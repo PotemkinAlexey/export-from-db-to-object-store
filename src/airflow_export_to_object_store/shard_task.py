@@ -24,7 +24,7 @@ from airflow.hooks.base import BaseHook
 
 from .metrics import ExportMetrics
 from .options import ParquetOptions, RetryOptions, ShardOptions, ShardResult
-from .parquet_io import ShardWorker
+from .parquet_io import ShardWorker, TransformFn
 from .retry import with_retries
 from .uploaders import resolve_uploader
 
@@ -60,6 +60,10 @@ class ShardTaskParams:
     shard_options: ShardOptions
     retry_options: RetryOptions
     skip_if_exists: bool = False
+    # Optional row-level transform applied to every Arrow batch before write.
+    # MUST be a top-level callable (importable by name) when running with
+    # ``execution_mode='processes'`` — closures and lambdas cannot be pickled.
+    transform_fn: TransformFn | None = None
 
 
 class _UploadHost:
@@ -184,6 +188,7 @@ def execute_shard(params: ShardTaskParams, cancel: threading.Event | None = None
         metrics=shard_metrics,
         log=log,
         cancel=cancel,
+        transform_fn=params.transform_fn,
     )
     result = worker.run()
     shard_metric = shard_metrics.shards[0] if shard_metrics.shards else {}

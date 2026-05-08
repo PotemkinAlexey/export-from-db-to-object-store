@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-05-08
+
+### Added
+- **Per-shard timeout** — ``ShardOptions.timeout`` (seconds) is now
+  honoured. A daemon ``threading.Timer`` started in ``ShardWorker.run``
+  flips the local stop event after the deadline, the fetch / write
+  threads exit promptly, and ``run`` raises ``TimeoutError``. The
+  operator's cross-shard cancellation propagates to siblings just like
+  any other failure. ``timeout=None`` keeps the previous behaviour
+  (no watchdog).
+- **Row-level transform hook** — pass ``transform_fn`` to apply a
+  ``pyarrow.Table -> pyarrow.Table`` mapping to every batch before the
+  Parquet writer sees it. Use cases: PII masking, derived columns,
+  type coercion. Empty-table returns are fine (continue with next
+  chunk); raised exceptions are wrapped with the shard index so they
+  don't get lost. Must be a top-level callable when running with
+  ``execution_mode="processes"``.
+
+### Changed
+- ``ShardWorker`` accepts an optional ``transform_fn``;
+  ``ShardTaskParams`` carries it across the executor boundary.
+
 ## [0.8.0] - 2026-05-08
 
 ### Added

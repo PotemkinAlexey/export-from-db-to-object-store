@@ -42,6 +42,13 @@ UploadFn = Callable[[Any, str, str], str]
 DbAdapterFactory = Callable[[str], Any]
 """(db_hook_id) -> object exposing cursor() and close()."""
 
+TransformFn = Callable[[pa.Table], pa.Table]
+"""Optional row-level Arrow transform applied to every batch before write.
+
+Use cases: PII masking, type coercion, computed columns. Must be a
+top-level callable when running with ``execution_mode='processes'``
+(lambdas / closures are not picklable across process boundaries)."""
+
 
 def _default_adapter_factory(db_hook_id: str) -> Any:
     return UniversalDbAdapter(db_hook_id)
@@ -69,6 +76,7 @@ class ShardWorker:
         log: logging.Logger,
         db_adapter_factory: DbAdapterFactory = _default_adapter_factory,
         cancel: threading.Event | None = None,
+        transform_fn: TransformFn | None = None,
     ) -> None:
         self.shard_index = shard_index
         self.sql_text = sql_text
@@ -85,6 +93,7 @@ class ShardWorker:
         self.metrics = metrics
         self.log = log
         self._adapter_factory = db_adapter_factory
+        self._transform_fn = transform_fn
 
         self._prefix = f"[Shard {shard_index}]"
         self._queue: queue.Queue[pa.Table | None] = queue.Queue(maxsize=2)
@@ -106,7 +115,35 @@ class ShardWorker:
     # ------------------------------------------------------------------
     def run(self) -> ShardResult:
         with _span("export.shard", **{"shard.index": self.shard_index}):
-            return self._run_inner()
+            timer = self._start_timeout_watchdog()
+            try:
+                return self._run_inner()
+            finally:
+                if timer is not None:
+                    timer.cancel()
+
+    def _start_timeout_watchdog(self) -> threading.Timer | None:
+        """Optional per-shard deadline.
+
+        When :attr:`ShardOptions.timeout` is set, a daemon ``threading.Timer``
+        flips ``_stop`` after that many seconds. The fetch / write / heartbeat
+        loops poll ``_should_stop()`` and exit promptly, run() raises the
+        accumulated error, and the operator's cross-shard cancel handles
+        sibling cleanup just like any other failure.
+        """
+        timeout = self.shard_options.timeout
+        if not timeout or timeout <= 0:
+            return None
+
+        def _on_deadline() -> None:
+            self.log.warning("%s Shard timeout (%.1fs) — cancelling", self._prefix, timeout)
+            self._errors.append(TimeoutError(f"shard {self.shard_index} exceeded timeout {timeout}s"))
+            self._stop.set()
+
+        timer = threading.Timer(timeout, _on_deadline)
+        timer.daemon = True
+        timer.start()
+        return timer
 
     def _run_inner(self) -> ShardResult:
         start = time.time()
@@ -199,6 +236,20 @@ class ShardWorker:
                     break
 
                 tbl = self._decode_dictionary(tbl)
+
+                if self._transform_fn is not None:
+                    try:
+                        tbl = self._transform_fn(tbl)
+                    except Exception as e:
+                        # User-supplied transforms run inside the fetch thread; a
+                        # bug there must not corrupt the queue or hang the shard.
+                        raise RuntimeError(
+                            f"transform_fn raised on shard {self.shard_index}: {e}"
+                        ) from e
+                    if tbl is None or tbl.num_rows == 0:
+                        # Transform may legitimately filter the entire batch; treat
+                        # like an empty fetch and try the next chunk.
+                        continue
 
                 if not tuned:
                     chunk_rows = self._auto_tune_chunk(tbl, chunk_rows, per_shard_mem_mb)

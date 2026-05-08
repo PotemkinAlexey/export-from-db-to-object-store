@@ -85,6 +85,7 @@ class StreamingExportOperator(BaseOperator):
         unload_strategy: UnloadStrategy | None = None,
         unload_dir_template: str = "{{ ds }}/",
         incremental: IncrementalConfig | None = None,
+        transform_fn: Any | None = None,
         **kwargs,
     ):
 
@@ -120,6 +121,7 @@ class StreamingExportOperator(BaseOperator):
         self.unload_strategy = unload_strategy
         self.unload_dir_template = unload_dir_template
         self.incremental = incremental
+        self.transform_fn = transform_fn
 
         # === NEW: metrics object ===
         self._metrics = ExportMetrics(self)
@@ -215,6 +217,7 @@ class StreamingExportOperator(BaseOperator):
                     shard_options=self.shard_options,
                     retry_options=self.retry_options,
                     skip_if_exists=self.skip_if_exists,
+                    transform_fn=self.transform_fn,
                 )
             )
 

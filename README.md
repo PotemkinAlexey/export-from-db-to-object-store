@@ -252,6 +252,46 @@ Each shard runs in parallel via the existing thread/process pool,
 writes its own Parquet file at the right Hive prefix, and feeds the
 manifest. No extra option needed.
 
+## Per-shard timeout
+
+`ShardOptions.timeout` (seconds) installs a watchdog timer per shard.
+If a shard exceeds the deadline — stuck DB query, slow upload, anything
+— the worker raises `TimeoutError`, the operator-wide cancellation
+signal fires, and sibling shards exit promptly:
+
+```python
+ShardOptions(max_workers=4, chunk_rows=50_000, timeout=30 * 60)  # 30 min
+```
+
+`timeout=None` (the default) disables the watchdog.
+
+## Row-level transforms
+
+Mask PII, derive columns, coerce types — anything that operates on a
+`pyarrow.Table` — by passing `transform_fn`:
+
+```python
+import pyarrow as pa
+
+def mask_email(tbl: pa.Table) -> pa.Table:
+    idx = tbl.schema.get_field_index("email")
+    return tbl.set_column(idx, "email", pa.array(["<redacted>"] * tbl.num_rows))
+
+StreamingExportOperator(
+    ...,
+    transform_fn=mask_email,
+)
+```
+
+The function runs inside the fetch thread, on every batch, before the
+Parquet writer sees it. Returning an empty Table for a batch is fine —
+the shard just continues with the next chunk. Errors from the
+transform are wrapped in a `RuntimeError` with the shard index so they
+don't get lost.
+
+> **Process mode**: when `execution_mode="processes"`, `transform_fn`
+> must be a top-level callable (lambdas and closures don't pickle).
+
 ## Plugins (third-party uploaders)
 
 Need an in-house S3-compatible store, custom DB-API bridge, or weird
