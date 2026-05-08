@@ -48,13 +48,13 @@ pip install "airflow-export-to-object-store[memcheck]"     # psutil for memory h
 ```python
 from airflow import DAG
 from airflow_export_to_object_store import (
-    ExportFromDBToObjectStoreOperator,
+    StreamingExportOperator,
     ParquetOptions,
     ShardOptions,
 )
 
 with DAG("example_export", schedule_interval=None) as dag:
-    export = ExportFromDBToObjectStoreOperator(
+    export = StreamingExportOperator(
         task_id="export_orders",
         db_hook_id="snowflake_conn",
         storage_hook_id="azure_blob_conn",
@@ -69,7 +69,7 @@ with DAG("example_export", schedule_interval=None) as dag:
 ### Sharded export
 
 ```python
-ExportFromDBToObjectStoreOperator(
+StreamingExportOperator(
     task_id="export_sharded",
     db_hook_id="postgres_conn",
     storage_hook_id="aws_s3_conn",

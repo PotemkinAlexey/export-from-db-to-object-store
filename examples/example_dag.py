@@ -1,4 +1,4 @@
-"""Example DAG demonstrating ExportFromDBToObjectStoreOperator."""
+"""Example DAG demonstrating StreamingExportOperator."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -6,7 +6,7 @@ from datetime import datetime
 from airflow import DAG
 
 from airflow_export_to_object_store import (
-    ExportFromDBToObjectStoreOperator,
+    StreamingExportOperator,
     ParquetOptions,
     ShardOptions,
 )
@@ -21,7 +21,7 @@ with DAG(
 ) as dag:
 
     # Single-shard export to Azure Blob.
-    export_simple = ExportFromDBToObjectStoreOperator(
+    export_simple = StreamingExportOperator(
         task_id="export_simple_azure",
         db_hook_id="snowflake_default",
         storage_hook_id="wasb_default",
@@ -32,7 +32,7 @@ with DAG(
     )
 
     # Sharded export to AWS S3.
-    export_sharded = ExportFromDBToObjectStoreOperator(
+    export_sharded = StreamingExportOperator(
         task_id="export_sharded_s3",
         db_hook_id="postgres_default",
         storage_hook_id="aws_default",

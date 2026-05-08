@@ -5,13 +5,13 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
-    from .operator import ExportFromDBToObjectStoreOperator
+    from .operator import StreamingExportOperator
 
 
 class ExportMetrics:
     """Collect detailed shard-level metrics."""
 
-    def __init__(self, operator: "ExportFromDBToObjectStoreOperator"):
+    def __init__(self, operator: "StreamingExportOperator"):
         self.operator = operator
         self.start_time: Optional[float] = None
         self.shards: List[Dict[str, Any]] = []

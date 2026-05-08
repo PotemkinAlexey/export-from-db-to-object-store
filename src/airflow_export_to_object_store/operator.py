@@ -46,7 +46,7 @@ except (ImportError, ModuleNotFoundError):
     ContentSettings = None
 
 
-class ExportFromDBToObjectStoreOperator(BaseOperator):
+class StreamingExportOperator(BaseOperator):
     """
     High-throughput streaming export from any SQL database to Parquet, uploaded to Azure Blob or AWS S3.
 
