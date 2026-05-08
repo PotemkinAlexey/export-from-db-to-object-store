@@ -12,9 +12,9 @@ import pytest
 
 pytest.importorskip("airflow.providers.google.cloud.hooks.gcs")
 
-from airflow.providers.google.cloud.hooks.gcs import GCSHook
+from airflow.providers.google.cloud.hooks.gcs import GCSHook  # noqa: E402
 
-from airflow_export_to_object_store.uploaders import GCSUploader, resolve_uploader
+from airflow_export_to_object_store.uploaders import GCSUploader, resolve_uploader  # noqa: E402
 
 LOG = logging.getLogger("test-gcs-upload")
 

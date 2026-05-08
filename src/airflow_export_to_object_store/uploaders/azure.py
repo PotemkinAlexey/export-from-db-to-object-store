@@ -5,7 +5,8 @@ import logging
 import mimetypes
 import os
 import uuid
-from typing import Any, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 try:
     from airflow.providers.microsoft.azure.hooks.wasb import WasbHook
@@ -29,15 +30,15 @@ class AzureBlobUploader:
     def matches(self, storage_hook: Any) -> bool:
         return WasbHook is not None and isinstance(storage_hook, WasbHook)
 
-    def network_targets(self) -> Sequence[Tuple[str, int]]:
+    def network_targets(self) -> Sequence[tuple[str, int]]:
         return [("blob.core.windows.net", 443)]
 
     def health_check(
         self,
         storage_hook: Any,
         *,
-        container: Optional[str],
-        bucket: Optional[str],
+        container: str | None,
+        bucket: str | None,
         log: logging.Logger,
     ) -> None:
         if not container:
@@ -78,8 +79,8 @@ class AzureBlobUploader:
         local_path: str,
         remote_path: str,
         *,
-        container: Optional[str],
-        bucket: Optional[str],
+        container: str | None,
+        bucket: str | None,
         overwrite: bool,
         storage_hook_id: str,
         log: logging.Logger,

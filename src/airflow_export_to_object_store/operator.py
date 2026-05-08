@@ -1,8 +1,8 @@
-# -*- coding: utf-8 -*-
-"""
-Universal streaming export operator:
-Execute SQL via any DB hook (PEP-249 / Airflow Connection) → stream Arrow batches
-→ write Parquet → upload to object storage (Azure Blob or AWS S3).
+"""Universal streaming export operator.
+
+Execute SQL via any DB hook (PEP-249 / Airflow Connection) → stream Arrow
+batches → write Parquet → upload to object storage (Azure Blob, AWS S3,
+or Google Cloud Storage).
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import shutil
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pyarrow as pa
 from airflow.hooks.base import BaseHook
@@ -24,9 +24,8 @@ from .parquet_validator import validate_parquet_schema
 from .retry import with_retries
 from .templating import (
     flatten_and_render_params as _flatten_and_render_params,
-    render_path_template,
-    render_template,
 )
+from .templating import render_path_template, render_template
 from .uploaders import resolve_uploader
 from .utils import coerce_ts_table, compute_md5_eff
 
@@ -60,18 +59,18 @@ class StreamingExportOperator(BaseOperator):
         task_id: str,
         db_hook_id: str,
         storage_hook_id: str,
-        query: Optional[str] = None,
-        sql_template: Optional[str] = None,
-        sql_params: Optional[Dict[str, Any]] = None,
-        shards: Optional[List[Dict[str, Any]]] = None,
+        query: str | None = None,
+        sql_template: str | None = None,
+        sql_params: dict[str, Any] | None = None,
+        shards: list[dict[str, Any]] | None = None,
         filename_template: str = "data_{{ '%03d' | format(shard_index) }}.parquet",
         remote_path_template: str = "{{ ds }}/data_{{ '%03d' | format(shard_index) }}.parquet",
-        container: Optional[str] = None,
-        bucket: Optional[str] = None,
-        parquet_options: Optional[ParquetOptions] = None,
-        retry_options: Optional[RetryOptions] = None,
-        shard_options: Optional[ShardOptions] = None,
-        tmp_dir: Optional[str] = None,
+        container: str | None = None,
+        bucket: str | None = None,
+        parquet_options: ParquetOptions | None = None,
+        retry_options: RetryOptions | None = None,
+        shard_options: ShardOptions | None = None,
+        tmp_dir: str | None = None,
         compute_md5: bool = False,
         overwrite: bool = True,
         log_timings: bool = True,
@@ -334,10 +333,10 @@ class StreamingExportOperator(BaseOperator):
     # ------------------------------------------------------------------
     # TEMPLATE RENDERING (delegates to templating module)
     # ------------------------------------------------------------------
-    def _render_template(self, template_str: str, ctx: Dict[str, Any], label: str = "template") -> str:
+    def _render_template(self, template_str: str, ctx: dict[str, Any], label: str = "template") -> str:
         return render_template(template_str, ctx, self.sql_params, self.log, label=label)
 
-    def _render_template_str(self, template_str: str, ctx: Dict[str, Any]) -> str:
+    def _render_template_str(self, template_str: str, ctx: dict[str, Any]) -> str:
         return render_path_template(template_str, ctx, self.sql_params, self.log)
 
     # ------------------------------------------------------------------

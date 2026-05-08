@@ -15,6 +15,7 @@ logger.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import queue
@@ -23,7 +24,7 @@ import tempfile
 import threading
 import time
 from contextlib import ExitStack
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -58,7 +59,7 @@ class ShardWorker:
         remote_path: str,
         db_hook_id: str,
         storage_hook: Any,
-        tmp_dir_root: Optional[str],
+        tmp_dir_root: str | None,
         parquet_options: ParquetOptions,
         shard_options: ShardOptions,
         compute_md5: bool,
@@ -85,9 +86,9 @@ class ShardWorker:
         self._adapter_factory = db_adapter_factory
 
         self._prefix = f"[Shard {shard_index}]"
-        self._queue: "queue.Queue[Optional[pa.Table]]" = queue.Queue(maxsize=2)
+        self._queue: queue.Queue[pa.Table | None] = queue.Queue(maxsize=2)
         self._stop = threading.Event()
-        self._errors: List[Exception] = []
+        self._errors: list[Exception] = []
         self._rows_lock = threading.Lock()
         self._rows_written = 0
         self._temp_path: str = ""
@@ -200,7 +201,7 @@ class ShardWorker:
             self._safe_put_sentinel()
 
     def _write(self) -> None:
-        writer: Optional[pq.ParquetWriter] = None
+        writer: pq.ParquetWriter | None = None
         try:
             while True:
                 try:
@@ -241,7 +242,7 @@ class ShardWorker:
     # ------------------------------------------------------------------
     # Fetch helpers
     # ------------------------------------------------------------------
-    def _fetch_one_batch(self, cursor: Any, chunk_rows: int, arrow_native: bool) -> Optional[pa.Table]:
+    def _fetch_one_batch(self, cursor: Any, chunk_rows: int, arrow_native: bool) -> pa.Table | None:
         if arrow_native:
             return cursor.fetchmany_arrow(chunk_rows)
 
@@ -297,10 +298,8 @@ class ShardWorker:
             return current_chunk
 
     def _safe_put_sentinel(self) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self._queue.put_nowait(None)
-        except Exception:
-            pass
 
     def _drain_queue(self) -> None:
         while True:
@@ -339,7 +338,7 @@ class ShardWorker:
 
         bytes_written = os.path.getsize(self._temp_path)
 
-        md5_hex: Optional[str] = None
+        md5_hex: str | None = None
         if self.compute_md5:
             md5_hex = compute_md5_eff(self._temp_path, log_fn=self.log.info)
 

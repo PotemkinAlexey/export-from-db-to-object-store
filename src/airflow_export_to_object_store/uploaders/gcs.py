@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 try:
     from airflow.providers.google.cloud.hooks.gcs import GCSHook
@@ -23,15 +24,15 @@ class GCSUploader:
     def matches(self, storage_hook: Any) -> bool:
         return GCSHook is not None and isinstance(storage_hook, GCSHook)
 
-    def network_targets(self) -> Sequence[Tuple[str, int]]:
+    def network_targets(self) -> Sequence[tuple[str, int]]:
         return [("storage.googleapis.com", 443)]
 
     def health_check(
         self,
         storage_hook: Any,
         *,
-        container: Optional[str],
-        bucket: Optional[str],
+        container: str | None,
+        bucket: str | None,
         log: logging.Logger,
     ) -> None:
         if not bucket:
@@ -69,8 +70,8 @@ class GCSUploader:
         local_path: str,
         remote_path: str,
         *,
-        container: Optional[str],
-        bucket: Optional[str],
+        container: str | None,
+        bucket: str | None,
         overwrite: bool,
         storage_hook_id: str,
         log: logging.Logger,

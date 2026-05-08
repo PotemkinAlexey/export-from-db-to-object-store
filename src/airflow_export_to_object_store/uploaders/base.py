@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List, Optional, Protocol, Sequence, Tuple, runtime_checkable
+from collections.abc import Sequence
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -19,15 +20,15 @@ class Uploader(Protocol):
     def matches(self, storage_hook: Any) -> bool:
         """True if this uploader can handle the given Airflow hook instance."""
 
-    def network_targets(self) -> Sequence[Tuple[str, int]]:
+    def network_targets(self) -> Sequence[tuple[str, int]]:
         """Hosts/ports to probe in :func:`network_health_check`. Empty = no probes."""
 
     def health_check(
         self,
         storage_hook: Any,
         *,
-        container: Optional[str],
-        bucket: Optional[str],
+        container: str | None,
+        bucket: str | None,
         log: logging.Logger,
     ) -> None:
         """Validate that credentials/permissions allow either reading or writing."""
@@ -38,8 +39,8 @@ class Uploader(Protocol):
         local_path: str,
         remote_path: str,
         *,
-        container: Optional[str],
-        bucket: Optional[str],
+        container: str | None,
+        bucket: str | None,
         overwrite: bool,
         storage_hook_id: str,
         log: logging.Logger,
@@ -47,7 +48,7 @@ class Uploader(Protocol):
         """Upload ``local_path`` and return a canonical URI (``s3://...``/``azure://...``)."""
 
 
-def get_registry() -> List[Uploader]:
+def get_registry() -> list[Uploader]:
     """Return all built-in uploaders. Order = priority."""
     # Imported lazily so that missing optional providers don't fail module load.
     from .azure import AzureBlobUploader
@@ -57,7 +58,7 @@ def get_registry() -> List[Uploader]:
     return [AzureBlobUploader(), S3Uploader(), GCSUploader()]
 
 
-def resolve_uploader(storage_hook: Any, registry: Optional[Sequence[Uploader]] = None) -> Uploader:
+def resolve_uploader(storage_hook: Any, registry: Sequence[Uploader] | None = None) -> Uploader:
     """Find the uploader that matches ``storage_hook`` or raise NotImplementedError."""
     for u in registry or get_registry():
         if u.matches(storage_hook):

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import pyarrow as pa
 
@@ -11,9 +11,9 @@ import pyarrow as pa
 def compute_md5_eff(
     file_path: str,
     *,
-    log_fn: Optional[Callable[[str], None]] = None,
+    log_fn: Callable[[str], None] | None = None,
     skip_threshold_gb: int = 10,
-) -> Optional[str]:
+) -> str | None:
     """Compute MD5 of a file with a single 8 MB buffer.
 
     Returns the hex digest, or ``None`` if the file exceeds ``skip_threshold_gb``

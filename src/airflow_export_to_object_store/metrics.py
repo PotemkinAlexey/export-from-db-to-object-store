@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .operator import StreamingExportOperator
@@ -11,10 +11,10 @@ if TYPE_CHECKING:
 class ExportMetrics:
     """Collect detailed shard-level metrics."""
 
-    def __init__(self, operator: "StreamingExportOperator"):
+    def __init__(self, operator: StreamingExportOperator):
         self.operator = operator
-        self.start_time: Optional[float] = None
-        self.shards: List[Dict[str, Any]] = []
+        self.start_time: float | None = None
+        self.shards: list[dict[str, Any]] = []
 
     def start(self) -> None:
         self.start_time = time.time()
@@ -33,7 +33,7 @@ class ExportMetrics:
             }
         )
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         if self.start_time is None:
             return {}
 

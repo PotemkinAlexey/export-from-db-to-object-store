@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from airflow import macros
 from jinja2 import StrictUndefined, Template
 
 
-def flatten_and_render_params(data: Mapping[str, Any], ctx: Mapping[str, Any]) -> Dict[str, Any]:
+def flatten_and_render_params(data: Mapping[str, Any], ctx: Mapping[str, Any]) -> dict[str, Any]:
     """Flatten nested dict/list and render Jinja templates in string leaves.
 
     Top-level input must be a dict; scalars at the very top would collide
@@ -18,7 +19,7 @@ def flatten_and_render_params(data: Mapping[str, Any], ctx: Mapping[str, Any]) -
     if not isinstance(data, Mapping):
         raise TypeError(f"flatten_and_render_params expects a Mapping, got {type(data).__name__}")
 
-    flat: Dict[str, Any] = {}
+    flat: dict[str, Any] = {}
 
     def _flatten(prefix: str, value: Any, depth: int = 0) -> None:
         if depth > 10:
@@ -41,7 +42,7 @@ def flatten_and_render_params(data: Mapping[str, Any], ctx: Mapping[str, Any]) -
 
     _flatten("", data)
 
-    rendered: Dict[str, Any] = {}
+    rendered: dict[str, Any] = {}
     for k, v in flat.items():
         if isinstance(v, str) and "{{" in v and "}}" in v:
             rendered[k] = Template(v, undefined=StrictUndefined).render(**ctx)

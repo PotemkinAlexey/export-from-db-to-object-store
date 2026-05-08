@@ -6,9 +6,9 @@ import logging
 import boto3
 import pytest
 
-moto = pytest.importorskip("moto")
+pytest.importorskip("moto")
 
-from airflow_export_to_object_store.uploaders.s3 import S3Uploader
+from airflow_export_to_object_store.uploaders.s3 import S3Uploader  # noqa: E402
 
 LOG = logging.getLogger("test-s3-integration")
 
@@ -78,15 +78,14 @@ def test_s3_upload_requires_bucket(tmp_path, aws_env, fake_connection):
     local = tmp_path / "data.parquet"
     local.write_bytes(b"x")
 
-    with mock_aws():
-        with pytest.raises(ValueError, match="bucket must be set"):
-            S3Uploader().upload(
-                _FakeAwsHook(),
-                str(local),
-                "k",
-                container=None,
-                bucket=None,
-                overwrite=True,
-                storage_hook_id="aws_test",
-                log=LOG,
-            )
+    with mock_aws(), pytest.raises(ValueError, match="bucket must be set"):
+        S3Uploader().upload(
+            _FakeAwsHook(),
+            str(local),
+            "k",
+            container=None,
+            bucket=None,
+            overwrite=True,
+            storage_hook_id="aws_test",
+            log=LOG,
+        )

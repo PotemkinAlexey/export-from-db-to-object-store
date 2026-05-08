@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 from airflow.hooks.base import BaseHook
 
@@ -36,15 +37,15 @@ class S3Uploader:
             return True
         return _is_aws_generic_hook(storage_hook)
 
-    def network_targets(self) -> Sequence[Tuple[str, int]]:
+    def network_targets(self) -> Sequence[tuple[str, int]]:
         return [("s3.amazonaws.com", 443)]
 
     def health_check(
         self,
         storage_hook: Any,
         *,
-        container: Optional[str],
-        bucket: Optional[str],
+        container: str | None,
+        bucket: str | None,
         log: logging.Logger,
     ) -> None:
         # Only the typed S3Hook exposes head_bucket cleanly; for the generic
@@ -66,8 +67,8 @@ class S3Uploader:
         local_path: str,
         remote_path: str,
         *,
-        container: Optional[str],
-        bucket: Optional[str],
+        container: str | None,
+        bucket: str | None,
         overwrite: bool,
         storage_hook_id: str,
         log: logging.Logger,

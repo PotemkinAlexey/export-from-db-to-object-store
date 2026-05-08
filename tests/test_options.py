@@ -1,6 +1,8 @@
 """Defaults and immutability of option dataclasses."""
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from airflow_export_to_object_store.options import (
@@ -37,7 +39,7 @@ def test_shard_defaults():
 
 def test_options_are_frozen():
     p = ParquetOptions()
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         p.compression = "snappy"  # type: ignore[misc]
 
 
