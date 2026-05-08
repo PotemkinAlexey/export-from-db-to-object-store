@@ -33,6 +33,7 @@ from .db_adapter import UniversalDbAdapter
 from .metrics import ExportMetrics
 from .options import ParquetOptions, ShardOptions, ShardResult
 from .parquet_validator import validate_parquet_schema
+from .tracing import span as _span
 from .utils import coerce_ts_table, compute_md5_eff
 
 UploadFn = Callable[[Any, str, str], str]
@@ -104,6 +105,10 @@ class ShardWorker:
     # Entry point
     # ------------------------------------------------------------------
     def run(self) -> ShardResult:
+        with _span("export.shard", **{"shard.index": self.shard_index}):
+            return self._run_inner()
+
+    def _run_inner(self) -> ShardResult:
         start = time.time()
         tmp_dir = tempfile.mkdtemp(dir=self.tmp_dir_root)
         self._temp_path = os.path.join(tmp_dir, self.filename)
@@ -371,11 +376,16 @@ class ShardWorker:
         )
 
         if self.validate_parquet:
-            if not validate_parquet_schema(self._temp_path, self.log):
-                raise ValueError(f"{self._prefix} Parquet validation failed for {self._temp_path}")
+            with _span("export.shard.validate", **{"shard.index": self.shard_index}):
+                if not validate_parquet_schema(self._temp_path, self.log):
+                    raise ValueError(f"{self._prefix} Parquet validation failed for {self._temp_path}")
             self.log.info("%s Parquet validation ✓ passed", self._prefix)
 
-        remote_uri = self.upload_fn(self.storage_hook, self._temp_path, self.remote_path)
+        with _span(
+            "export.shard.upload",
+            **{"shard.index": self.shard_index, "shard.bytes": bytes_written, "shard.rows": rows},
+        ):
+            remote_uri = self.upload_fn(self.storage_hook, self._temp_path, self.remote_path)
 
         return ShardResult(
             shard_index=self.shard_index,

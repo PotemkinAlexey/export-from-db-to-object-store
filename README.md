@@ -175,6 +175,37 @@ Today the Snowflake strategy supports S3 and GCS targets out of the box;
 Azure unload requires the storage account name (open an issue with your
 setup if you need it).
 
+## Plugins (third-party uploaders)
+
+Need an in-house S3-compatible store, custom DB-API bridge, or weird
+cloud? Register an `Uploader` from your package via entry points:
+
+```toml
+# your_pkg/pyproject.toml
+[project.entry-points."airflow_export_to_object_store.uploaders"]
+my_storage = "my_pkg.uploaders:MyUploader"
+```
+
+The class (or zero-arg factory) is auto-discovered when this package
+loads. Built-in backends still take priority; bad plugins are logged
+and skipped — they cannot break the operator.
+
+## Tracing (OpenTelemetry)
+
+Install the optional extra:
+
+```bash
+pip install "airflow-export-to-object-store[otel]"
+```
+
+The operator emits spans named `export.execute`, `export.run_shards`,
+`export.shard`, `export.shard.validate`, `export.shard.upload`, and
+`export.unload` with attributes such as `shard.index`, `shard.rows`,
+`shard.bytes`, `unload.strategy`, `export.task_id`. With Airflow 2.10+'s
+built-in OTel exporter (or your own SDK setup) these light up
+automatically. Without `opentelemetry-api` installed the helpers are
+no-ops with negligible overhead.
+
 ## Configuration objects
 
 | Object | Key fields |

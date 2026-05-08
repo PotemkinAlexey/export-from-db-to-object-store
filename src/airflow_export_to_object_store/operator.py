@@ -27,6 +27,7 @@ from .templating import (
     flatten_and_render_params as _flatten_and_render_params,
 )
 from .templating import render_path_template, render_template
+from .tracing import span as _span
 from .unload import UnloadStrategy
 from .uploaders import resolve_uploader
 from .utils import coerce_ts_table, compute_md5_eff
@@ -133,6 +134,19 @@ class StreamingExportOperator(BaseOperator):
             • Collect metrics into final summary"""
         t0 = time.time()
 
+        with _span(
+            "export.execute",
+            **{
+                "export.task_id": self.task_id,
+                "export.db_hook_id": self.db_hook_id,
+                "export.storage_hook_id": self.storage_hook_id,
+                "export.mode": "unload" if self.unload_strategy is not None else "stream",
+                "export.shards": len(self.shards),
+            },
+        ):
+            return self._execute_inner(context, t0)
+
+    def _execute_inner(self, context, t0):
         self._clean_old_tmp_dirs()
 
         # Pre-flight checks
@@ -285,7 +299,11 @@ class StreamingExportOperator(BaseOperator):
     # ------------------------------------------------------------------
     # NATIVE UNLOAD
     # ------------------------------------------------------------------
-    def _run_unload(self, context: dict[str, Any]) -> tuple[list[ShardResult], str]:
+    def _run_unload(self, context: dict[str, Any]) -> tuple[list[ShardResult], str]:  # noqa: D401
+        with _span("export.unload", **{"unload.strategy": type(self.unload_strategy).__name__}):
+            return self._run_unload_inner(context)
+
+    def _run_unload_inner(self, context: dict[str, Any]) -> tuple[list[ShardResult], str]:
         """Delegate to the warehouse-native bulk export strategy.
 
         We render a single SQL (no shards: the warehouse parallelises)

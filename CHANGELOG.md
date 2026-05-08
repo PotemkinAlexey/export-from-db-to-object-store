@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-05-08
+
+### Added
+- **Third-party uploader plugins** via the
+  ``airflow_export_to_object_store.uploaders`` entry-point group. Drop
+  an ``Uploader``-implementing class into your own package's
+  ``pyproject.toml`` and the registry picks it up at runtime, after the
+  built-ins. Bad entry points (import errors, wrong shape) are logged
+  and skipped — never fatal.
+- **OpenTelemetry tracing** (optional ``[otel]`` extra). The operator
+  emits spans named ``export.execute``, ``export.run_shards``,
+  ``export.shard``, ``export.shard.validate``, ``export.shard.upload``,
+  ``export.unload`` with attributes for task / shard / unload. No-op
+  overhead when ``opentelemetry-api`` is not installed.
+- New ``tracing`` module: ``span(...)`` context manager,
+  ``set_attribute(...)``, ``is_available()``.
+
+### Changed
+- ``get_registry()`` now composes built-in uploaders with discovered
+  entry-point plugins.
+
 ## [0.6.0] - 2026-05-08
 
 ### Added

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "airflow-export-to-object-store"
-version = "0.6.0"
+version = "0.7.0"
 description = "Universal streaming Airflow operator: SQL DB → Arrow → Parquet → Azure Blob / AWS S3."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -66,6 +66,7 @@ snowflake = [
 databricks = ["databricks-sql-connector>=2.9"]
 teradata = ["teradatasql>=17.20"]
 memcheck = ["psutil>=5.9"]
+otel = ["opentelemetry-api>=1.20"]
 dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
