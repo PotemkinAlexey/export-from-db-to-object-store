@@ -18,6 +18,7 @@ import pyarrow as pa
 from airflow.hooks.base import BaseHook
 from airflow.models import BaseOperator
 
+from .manifest import build_manifest, resolve_manifest_path, write_manifest_local
 from .metrics import ExportMetrics
 from .options import ParquetOptions, RetryOptions, ShardOptions, ShardResult
 from .parquet_validator import validate_parquet_schema
@@ -75,6 +76,9 @@ class StreamingExportOperator(BaseOperator):
         overwrite: bool = True,
         log_timings: bool = True,
         validate_parquet: bool = True,
+        skip_if_exists: bool = False,
+        write_manifest: bool = False,
+        manifest_path: str | None = None,
         **kwargs,
     ):
 
@@ -104,6 +108,9 @@ class StreamingExportOperator(BaseOperator):
         self.overwrite = overwrite
         self.log_timings = log_timings
         self.validate_parquet = validate_parquet
+        self.skip_if_exists = skip_if_exists
+        self.write_manifest = write_manifest
+        self.manifest_path = manifest_path
 
         # === NEW: metrics object ===
         self._metrics = ExportMetrics(self)
@@ -154,10 +161,15 @@ class StreamingExportOperator(BaseOperator):
                     parquet_options=self.parquet_options,
                     shard_options=self.shard_options,
                     retry_options=self.retry_options,
+                    skip_if_exists=self.skip_if_exists,
                 )
             )
 
         results = self._run_shards(shard_params)
+
+        if self.write_manifest:
+            self._write_manifest(results, [p.remote_path for p in shard_params])
+
         elapsed = time.time() - t0
 
         summary = self._metrics.summary()
@@ -240,6 +252,35 @@ class StreamingExportOperator(BaseOperator):
 
         # All slots are now non-None.
         return [r for r in results if r is not None]
+
+    # ------------------------------------------------------------------
+    # MANIFEST
+    # ------------------------------------------------------------------
+    def _write_manifest(self, results: list[ShardResult], remote_paths: list[str]) -> None:
+        manifest_remote = resolve_manifest_path(self.manifest_path, results, remote_paths)
+        if not manifest_remote:
+            self.log.info("Skipping manifest: no shards produced output.")
+            return
+
+        manifest = build_manifest(results)
+        with tempfile.TemporaryDirectory() as td:
+            local = os.path.join(td, "_manifest.json")
+            size = write_manifest_local(manifest, local)
+            self.log.info("Manifest %d bytes → %s", size, manifest_remote)
+
+            storage_hook = BaseHook.get_hook(self.storage_hook_id)
+            uploader = resolve_uploader(storage_hook)
+            uri = uploader.upload(
+                storage_hook,
+                local,
+                manifest_remote,
+                container=self.container,
+                bucket=self.bucket,
+                overwrite=True,
+                storage_hook_id=self.storage_hook_id,
+                log=self.log,
+            )
+            self.log.info("Manifest uploaded → %s", uri)
 
     # ------------------------------------------------------------------
     # HEALTH CHECKS

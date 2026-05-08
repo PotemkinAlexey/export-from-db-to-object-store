@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-08
+
+### Added
+- **Idempotent re-runs** via ``skip_if_exists=True``. The shard probes the
+  destination through a new ``Uploader.exists()`` method (implemented for
+  S3 / Azure / GCS) before touching the DB; matching objects make the
+  shard return early with ``ShardResult.skipped=True`` and zero rows/bytes.
+- ``ShardResult.skipped: bool`` field (default ``False``) so downstream
+  XCom consumers can distinguish freshly-uploaded shards from re-used ones.
+- **Manifest writer** (``write_manifest=True``). Emits ``_manifest.json``
+  at the common prefix of all shard remote paths (or ``manifest_path`` if
+  set explicitly). Schema is versioned and lists every file with
+  shard_index, remote_uri, rows, bytes, md5 and skipped flag, plus
+  totals — a small atomic catalog for Athena / Trino / Spark / registries.
+- New ``manifest`` module with ``build_manifest``, ``resolve_manifest_path``,
+  ``write_manifest_local`` (atomic via tempfile + os.replace).
+
+### Changed
+- ``ShardTaskParams`` carries a new ``skip_if_exists`` flag.
+- ``execute_shard`` resolves the uploader once at entry so the existence
+  probe and the upload share the same backend instance.
+
 ## [0.4.0] - 2026-05-08
 
 ### Added

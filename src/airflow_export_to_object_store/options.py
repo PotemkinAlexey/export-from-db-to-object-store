@@ -47,3 +47,8 @@ class ShardResult:
     bytes: int
     md5: str | None
     elapsed_s: float
+    # True when ``skip_if_exists`` matched a pre-existing remote object and the
+    # shard was not re-uploaded. Rows/bytes/md5 then describe the **local**
+    # parquet that we would have uploaded; remote_uri is the canonical URI of
+    # the existing object.
+    skipped: bool = False

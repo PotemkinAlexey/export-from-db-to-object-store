@@ -73,6 +73,23 @@ class AzureBlobUploader:
 
         raise RuntimeError("Azure health check failed: neither read nor write allowed")
 
+    def exists(
+        self,
+        storage_hook: Any,
+        *,
+        container: str | None,
+        bucket: str | None,
+        remote_path: str,
+    ) -> bool:
+        if not container:
+            return False
+        try:
+            client = storage_hook.get_conn()
+            blob = client.get_blob_client(container=container, blob=remote_path)
+            return bool(blob.exists())
+        except Exception:
+            return False
+
     def upload(
         self,
         storage_hook: Any,

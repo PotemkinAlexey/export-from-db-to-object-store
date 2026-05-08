@@ -29,6 +29,19 @@ from .retry import with_retries
 from .uploaders import resolve_uploader
 
 
+_SCHEMES = {"azure": "azure", "s3": "s3", "gcs": "gs"}
+
+
+def _canonical_uri(uploader_name: str, params: "ShardTaskParams") -> str:
+    """Produce the same ``scheme://container_or_bucket/remote_path`` string
+    each backend's ``upload()`` returns, without touching the network."""
+    scheme = _SCHEMES.get(uploader_name, uploader_name)
+    bucket_or_container = params.container if uploader_name == "azure" else params.bucket
+    if not bucket_or_container:
+        return ""
+    return f"{scheme}://{bucket_or_container}/{params.remote_path}"
+
+
 @dataclass(frozen=True)
 class ShardTaskParams:
     shard_index: int
@@ -46,6 +59,7 @@ class ShardTaskParams:
     parquet_options: ParquetOptions
     shard_options: ShardOptions
     retry_options: RetryOptions
+    skip_if_exists: bool = False
 
 
 class _UploadHost:
@@ -94,6 +108,48 @@ def execute_shard(params: ShardTaskParams, cancel: threading.Event | None = None
     log = logging.getLogger(f"export.shard.{params.shard_index}")
 
     storage_hook = BaseHook.get_hook(params.storage_hook_id)
+    uploader = resolve_uploader(storage_hook)
+
+    # Idempotency short-circuit: if the destination already has an object,
+    # don't even open a DB cursor. Cheaper than fetching+writing+comparing.
+    if params.skip_if_exists:
+        try:
+            exists = uploader.exists(
+                storage_hook,
+                container=params.container,
+                bucket=params.bucket,
+                remote_path=params.remote_path,
+            )
+        except Exception as e:  # pragma: no cover - defensive
+            log.warning("exists() probe failed (%s) — proceeding with upload", e)
+            exists = False
+        if exists:
+            log.info("Already present at %s — skipping shard %d", params.remote_path, params.shard_index)
+            remote_uri = _canonical_uri(uploader.name, params)
+            elapsed = 0.0
+            shard_metric = {
+                "shard_index": params.shard_index,
+                "rows": 0,
+                "bytes": 0,
+                "bytes_mb": 0.0,
+                "duration_s": elapsed,
+                "throughput_rows_s": 0.0,
+                "throughput_mb_s": 0.0,
+                "skipped": True,
+            }
+            return (
+                ShardResult(
+                    shard_index=params.shard_index,
+                    remote_uri=remote_uri,
+                    rows=0,
+                    bytes=0,
+                    md5=None,
+                    elapsed_s=elapsed,
+                    skipped=True,
+                ),
+                shard_metric,
+            )
+
     host = _UploadHost(log=log, retry_options=params.retry_options)
 
     def _upload_fn(hook: Any, local_path: str, remote_path: str) -> str:

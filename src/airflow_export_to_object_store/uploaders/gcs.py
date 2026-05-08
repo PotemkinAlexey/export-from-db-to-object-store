@@ -64,6 +64,21 @@ class GCSUploader:
 
         raise RuntimeError("GCS health check failed: neither write nor bucket-read allowed")
 
+    def exists(
+        self,
+        storage_hook: Any,
+        *,
+        container: str | None,
+        bucket: str | None,
+        remote_path: str,
+    ) -> bool:
+        if not bucket:
+            return False
+        try:
+            return bool(storage_hook.exists(bucket_name=bucket, object_name=remote_path))
+        except Exception:
+            return False
+
     def upload(
         self,
         storage_hook: Any,

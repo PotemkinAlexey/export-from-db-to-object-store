@@ -53,3 +53,17 @@ def test_shard_result_constructs():
     r = ShardResult(shard_index=0, remote_uri="s3://x/y", rows=10, bytes=1024, md5=None, elapsed_s=1.5)
     assert r.shard_index == 0
     assert r.remote_uri == "s3://x/y"
+    assert r.skipped is False  # default
+
+
+def test_shard_result_skipped_flag():
+    r = ShardResult(
+        shard_index=0,
+        remote_uri="s3://x/y",
+        rows=0,
+        bytes=0,
+        md5=None,
+        elapsed_s=0.0,
+        skipped=True,
+    )
+    assert r.skipped is True

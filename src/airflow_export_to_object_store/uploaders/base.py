@@ -47,6 +47,20 @@ class Uploader(Protocol):
     ) -> str:
         """Upload ``local_path`` and return a canonical URI (``s3://...``/``azure://...``)."""
 
+    def exists(
+        self,
+        storage_hook: Any,
+        *,
+        container: str | None,
+        bucket: str | None,
+        remote_path: str,
+    ) -> bool:
+        """Return True iff an object already exists at ``remote_path``.
+
+        Used by ``skip_if_exists`` to make re-runs idempotent. Implementations
+        should treat any auth/network error as ``False`` (caller will then
+        attempt the upload, which surfaces the real error)."""
+
 
 def get_registry() -> list[Uploader]:
     """Return all built-in uploaders. Order = priority."""

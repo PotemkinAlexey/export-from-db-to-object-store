@@ -25,6 +25,8 @@ Designed for high-volume exports with a **minimal memory footprint**.
 - **Per-shard metrics** — pushed to XCom, plus a colourful ASCII summary in logs.
 - **Jinja templates** — full Airflow macros support (`{{ ds }}`, etc.) in SQL and remote paths.
 - **Parquet validation** — footer / row-groups / sample-read sanity checks before upload.
+- **Idempotent re-runs** — `skip_if_exists=True` short-circuits any shard whose remote object is already in place (no DB cursor opened, no upload).
+- **Manifest** — `write_manifest=True` emits `_manifest.json` next to the data with file list, sizes, MD5s, totals — atomic catalog for downstream consumers.
 
 ## Installation
 
@@ -87,6 +89,45 @@ StreamingExportOperator(
     remote_path_template="events/{{ ds }}/part_{{ '%03d' | format(shard_index) }}.parquet",
 )
 ```
+
+## Idempotency and manifest
+
+```python
+StreamingExportOperator(
+    task_id="export_orders",
+    db_hook_id="snowflake_default",
+    storage_hook_id="aws_default",
+    bucket="my-data-lake",
+    sql_template="SELECT * FROM orders WHERE date = '{{ ds }}'",
+    remote_path_template="orders/{{ ds }}/data.parquet",
+    skip_if_exists=True,         # safe to re-run / clear / retry
+    write_manifest=True,          # writes orders/{{ ds }}/_manifest.json
+)
+```
+
+`skip_if_exists` probes the destination via the backend's `head_object` /
+`exists()` API before opening any DB cursor. If the file is already there
+the shard returns immediately with `ShardResult.skipped=True` and zero
+rows/bytes. Combined with deterministic `remote_path_template` this makes
+clear-and-retry of partially-failed exports safe by default.
+
+`write_manifest` writes a small JSON catalog at the common prefix of all
+shard paths (or at `manifest_path` if you set it explicitly):
+
+```json
+{
+  "version": 1,
+  "exported_at": "2026-05-08T12:34:56+00:00",
+  "total_rows": 1500000,
+  "total_bytes": 1234567890,
+  "files": [
+    {"shard_index": 0, "remote_uri": "s3://...", "rows": 250000, "bytes": 205678123, "md5": null, "skipped": false}
+  ]
+}
+```
+
+Downstream readers (Athena, Trino, Spark, schema registries) can act on
+the manifest atomically without listing the bucket.
 
 ## Configuration objects
 

@@ -61,6 +61,34 @@ class S3Uploader:
         conn.head_bucket(Bucket=resolved)
         log.info("S3 health check OK ✓ (head_bucket on %s)", resolved)
 
+    def exists(
+        self,
+        storage_hook: Any,
+        *,
+        container: str | None,
+        bucket: str | None,
+        remote_path: str,
+    ) -> bool:
+        resolved = bucket or getattr(storage_hook, "bucket_name", None)
+        if not resolved:
+            return False
+        try:
+            if S3Hook is not None and isinstance(storage_hook, S3Hook):
+                client = storage_hook.get_conn()
+            else:
+                import boto3
+
+                aws_conn = BaseHook.get_connection(getattr(storage_hook, "aws_conn_id", None) or "aws_default")
+                client = boto3.session.Session(
+                    aws_access_key_id=aws_conn.login,
+                    aws_secret_access_key=aws_conn.password,
+                    region_name=aws_conn.extra_dejson.get("region_name"),
+                ).client("s3")
+            client.head_object(Bucket=resolved, Key=remote_path)
+            return True
+        except Exception:
+            return False
+
     def upload(
         self,
         storage_hook: Any,
