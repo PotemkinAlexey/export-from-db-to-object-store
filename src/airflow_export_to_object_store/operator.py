@@ -18,6 +18,7 @@ import pyarrow as pa
 from airflow.hooks.base import BaseHook
 from airflow.models import BaseOperator
 
+from .incremental import IncrementalConfig, coerce_watermark
 from .manifest import build_manifest, resolve_manifest_path, write_manifest_local
 from .metrics import ExportMetrics
 from .options import ParquetOptions, RetryOptions, ShardOptions, ShardResult
@@ -83,6 +84,7 @@ class StreamingExportOperator(BaseOperator):
         manifest_path: str | None = None,
         unload_strategy: UnloadStrategy | None = None,
         unload_dir_template: str = "{{ ds }}/",
+        incremental: IncrementalConfig | None = None,
         **kwargs,
     ):
 
@@ -117,6 +119,7 @@ class StreamingExportOperator(BaseOperator):
         self.manifest_path = manifest_path
         self.unload_strategy = unload_strategy
         self.unload_dir_template = unload_dir_template
+        self.incremental = incremental
 
         # === NEW: metrics object ===
         self._metrics = ExportMetrics(self)
@@ -152,6 +155,11 @@ class StreamingExportOperator(BaseOperator):
         # Pre-flight checks
         self._health_checks(context)
 
+        # Incremental: read prev watermark, compute now, inject into ctx.
+        watermark_now: str | None = None
+        if self.incremental is not None:
+            watermark_now = self._prepare_incremental_context(context)
+
         self._metrics.start()
 
         # Native unload bypass: ask the warehouse to write directly to the
@@ -168,6 +176,7 @@ class StreamingExportOperator(BaseOperator):
                 summary.get("total_rows", 0),
                 summary.get("total_bytes_mb", 0),
             )
+            self._commit_watermark(context, watermark_now)
             return {
                 "shards": [r.__dict__ for r in sorted(results, key=lambda x: x.shard_index)],
                 "metrics": summary,
@@ -175,6 +184,7 @@ class StreamingExportOperator(BaseOperator):
                 "total_bytes": summary.get("total_bytes", 0),
                 "elapsed_s": elapsed,
                 "mode": "unload",
+                "watermark": watermark_now,
             }
 
         shard_params: list[ShardTaskParams] = []
@@ -224,12 +234,14 @@ class StreamingExportOperator(BaseOperator):
             summary["total_bytes_mb"],
         )
 
+        self._commit_watermark(context, watermark_now)
         return {
             "shards": [r.__dict__ for r in sorted(results, key=lambda x: x.shard_index)],
             "metrics": summary,
             "total_rows": summary["total_rows"],
             "total_bytes": summary["total_bytes"],
             "elapsed_s": elapsed,
+            "watermark": watermark_now,
         }
 
     @staticmethod
@@ -295,6 +307,74 @@ class StreamingExportOperator(BaseOperator):
 
         # All slots are now non-None.
         return [r for r in results if r is not None]
+
+    # ------------------------------------------------------------------
+    # INCREMENTAL / WATERMARK
+    # ------------------------------------------------------------------
+    def _prepare_incremental_context(self, context: dict[str, Any]) -> str:
+        """Read previous watermark from XCom, compute the new one, and
+        inject both into the rendering context as ``watermark_prev`` and
+        ``watermark_now``. Returns the new watermark for later commit.
+        """
+        cfg = self.incremental
+        ti = context.get("ti") or context.get("task_instance")
+        prev = None
+        if ti is not None:
+            try:
+                prev = ti.xcom_pull(task_ids=self.task_id, key=cfg.xcom_key, include_prior_dates=True)
+            except Exception as e:  # pragma: no cover - defensive
+                self.log.warning("Could not read previous watermark from XCom: %s", e)
+        watermark_prev = coerce_watermark(prev) or cfg.default_value
+
+        if cfg.watermark_query is not None:
+            rendered = self._render_template(cfg.watermark_query, dict(context), label="watermark_query")
+            watermark_now = coerce_watermark(self._fetch_scalar(rendered)) or watermark_prev
+        else:
+            assert cfg.watermark_now_template is not None  # enforced by IncrementalConfig
+            watermark_now = self._render_template(
+                cfg.watermark_now_template, dict(context), label="watermark_now"
+            )
+
+        self.log.info("Incremental window: prev=%r → now=%r", watermark_prev, watermark_now)
+
+        # Surface both values to all subsequent template renders (SQL,
+        # filename, remote_path, unload_dir).
+        context["watermark_prev"] = watermark_prev
+        context["watermark_now"] = watermark_now
+        # Also stash inside sql_params so flatten_and_render_params picks them
+        # up when the user references them by bare name.
+        self.sql_params = {
+            **self.sql_params,
+            "watermark_prev": watermark_prev,
+            "watermark_now": watermark_now,
+        }
+        return watermark_now
+
+    def _fetch_scalar(self, sql: str) -> Any:
+        """Run a one-row, one-column query against the source DB and return its value."""
+        db_hook = BaseHook.get_hook(self.db_hook_id)
+        if hasattr(db_hook, "get_first"):
+            row = db_hook.get_first(sql)
+        elif hasattr(db_hook, "get_records"):
+            rows = db_hook.get_records(sql)
+            row = rows[0] if rows else None
+        else:  # pragma: no cover - very old hook
+            raise RuntimeError(f"DB hook {type(db_hook).__name__} has no get_first/get_records")
+        if not row:
+            return None
+        return row[0] if isinstance(row, (list, tuple)) else row
+
+    def _commit_watermark(self, context: dict[str, Any], watermark_now: str | None) -> None:
+        """Push the new watermark to XCom under the configured key."""
+        if self.incremental is None or watermark_now is None:
+            return
+        ti = context.get("ti") or context.get("task_instance")
+        if ti is None:  # pragma: no cover - in real Airflow ``ti`` always present
+            return
+        try:
+            ti.xcom_push(key=self.incremental.xcom_key, value=watermark_now)
+        except Exception as e:  # pragma: no cover - defensive
+            self.log.warning("Could not push watermark to XCom: %s", e)
 
     # ------------------------------------------------------------------
     # NATIVE UNLOAD

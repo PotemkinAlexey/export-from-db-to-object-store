@@ -175,6 +175,83 @@ Today the Snowflake strategy supports S3 and GCS targets out of the box;
 Azure unload requires the storage account name (open an issue with your
 setup if you need it).
 
+## Incremental exports (watermark)
+
+Most exports are incremental — "rows that changed since the last run".
+Plug in an :class:`IncrementalConfig` and the operator handles the
+state plumbing:
+
+```python
+from airflow_export_to_object_store import (
+    IncrementalConfig,
+    StreamingExportOperator,
+)
+
+StreamingExportOperator(
+    task_id="export_orders",
+    db_hook_id="postgres_default",
+    storage_hook_id="aws_default",
+    bucket="my-data-lake",
+    sql_template="""
+        SELECT *
+        FROM orders
+        WHERE updated_at >  '{{ watermark_prev }}'
+          AND updated_at <= '{{ watermark_now }}'
+    """,
+    remote_path_template="orders/{{ ds }}/data.parquet",
+    incremental=IncrementalConfig(
+        watermark_query="SELECT MAX(updated_at) FROM orders",
+        # OR: watermark_now_template="{{ ts }}",
+        xcom_key="watermark",
+        default_value="1970-01-01 00:00:00",
+    ),
+    write_manifest=True,
+    skip_if_exists=True,
+)
+```
+
+What happens at runtime:
+
+1. Before the export, the operator reads the previous run's watermark
+   from XCom (`include_prior_dates=True`) — or falls back to
+   `default_value` on first run.
+2. It computes a fresh watermark either by running
+   `watermark_query` against the source (recommended — captures a
+   single consistent moment regardless of how long the export takes),
+   or by rendering `watermark_now_template` locally.
+3. Both values are exposed as `{{ watermark_prev }}` / `{{ watermark_now }}`
+   to your SQL, file path, and remote path templates.
+4. On success the new watermark is pushed back to XCom under
+   `xcom_key`, ready to become `watermark_prev` next time.
+
+Combined with `skip_if_exists=True` and a deterministic
+`remote_path_template`, re-runs and partial recoveries become trivial.
+
+## Hive-style partitioning
+
+Hive layout (`country=US/year=2026/data.parquet`) gives downstream
+engines partition pruning. Express it with shards:
+
+```python
+StreamingExportOperator(
+    sql_template="""
+        SELECT * FROM events
+        WHERE country = '{{ country }}'
+          AND year = {{ year }}
+    """,
+    shards=[
+        {"country": c, "year": y}
+        for c in ("US", "DE", "JP")
+        for y in (2025, 2026)
+    ],
+    remote_path_template="events/country={{ country }}/year={{ year }}/data.parquet",
+)
+```
+
+Each shard runs in parallel via the existing thread/process pool,
+writes its own Parquet file at the right Hive prefix, and feeds the
+manifest. No extra option needed.
+
 ## Plugins (third-party uploaders)
 
 Need an in-house S3-compatible store, custom DB-API bridge, or weird

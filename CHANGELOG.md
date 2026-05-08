@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-05-08
+
+### Added
+- **Watermark-based incremental exports** via the new
+  ``IncrementalConfig``. The operator reads the previous watermark
+  from XCom (with ``include_prior_dates=True``), computes a fresh one
+  by either running a user-provided ``watermark_query`` against the
+  source or rendering ``watermark_now_template`` locally, exposes both
+  as ``{{ watermark_prev }}`` / ``{{ watermark_now }}`` in the SQL +
+  path templates, and pushes the new value back to XCom on success
+  under the configured ``xcom_key``.
+- Operator output now includes ``watermark`` in its XCom payload (only
+  when ``incremental`` is set).
+- New ``incremental`` module with ``IncrementalConfig`` and
+  ``coerce_watermark`` (handles ``datetime``, ``date``, ``Decimal``,
+  ``None``).
+- README documents both the incremental pattern and Hive-style
+  partitioning via shards (no operator option needed — shard params
+  feed both SQL and ``remote_path_template``).
+
+### Changed
+- ``StreamingExportOperator.__init__`` accepts ``incremental:
+  IncrementalConfig | None``; when set, the operator wires watermarks
+  through templating + XCom in both streaming and unload modes.
+
 ## [0.7.0] - 2026-05-08
 
 ### Added
