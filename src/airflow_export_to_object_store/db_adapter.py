@@ -1,4 +1,5 @@
 """Universal DB-API / Airflow connection adapter."""
+
 from __future__ import annotations
 
 import logging

@@ -1,4 +1,5 @@
 """Unit tests for AzureBlobUploader's simple and block upload paths."""
+
 from __future__ import annotations
 
 import logging
@@ -31,9 +32,7 @@ def test_simple_upload_calls_blob_client(tmp_path):
     local.write_bytes(payload)
     hook, service, blob = _make_hook()
 
-    uri = AzureBlobUploader._simple(
-        hook, str(local), "exports/data.parquet", "my-container", True, LOG
-    )
+    uri = AzureBlobUploader._simple(hook, str(local), "exports/data.parquet", "my-container", True, LOG)
 
     assert uri == "azure://my-container/exports/data.parquet"
     service.get_blob_client.assert_called_once_with(container="my-container", blob="exports/data.parquet")

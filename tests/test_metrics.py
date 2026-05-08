@@ -1,4 +1,5 @@
 """Smoke tests for ExportMetrics."""
+
 from __future__ import annotations
 
 import logging

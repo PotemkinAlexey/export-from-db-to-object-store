@@ -1,4 +1,5 @@
 """Row-level transform_fn applied to every Arrow batch before write."""
+
 from __future__ import annotations
 
 import logging
@@ -46,7 +47,8 @@ def _build(tmp_path, factory, *, transform_fn):
 
     def _upload(_hook, local_path, remote_path):
         captured["local"] = local_path
-        captured["bytes"] = open(local_path, "rb").read()
+        with open(local_path, "rb") as f:
+            captured["bytes"] = f.read()
         return f"fake://{remote_path}"
 
     return (

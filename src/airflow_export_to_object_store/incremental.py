@@ -22,6 +22,7 @@ operator gives you exactly that without manual XCom plumbing:
 This module owns only the dataclass and the pure helpers that need
 testing in isolation; the operator does the actual XCom + DB calls.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -52,10 +53,7 @@ class IncrementalConfig:
 
     def __post_init__(self) -> None:
         if bool(self.watermark_query) == bool(self.watermark_now_template):
-            raise ValueError(
-                "IncrementalConfig requires exactly one of "
-                "watermark_query or watermark_now_template"
-            )
+            raise ValueError("IncrementalConfig requires exactly one of watermark_query or watermark_now_template")
 
 
 def coerce_watermark(value: object) -> str:

@@ -23,6 +23,7 @@ bucket. Schema is intentionally minimal and forward-compatible:
       ]
     }
 """
+
 from __future__ import annotations
 
 import json

@@ -10,9 +10,10 @@ Exporting traces is the operator's user's responsibility — Airflow 2.10+
 ships a built-in OTel integration; older versions need a small
 :mod:`opentelemetry-sdk` setup in the DAG bootstrap.
 """
+
 from __future__ import annotations
 
-import contextlib
+from contextlib import contextmanager, suppress
 from typing import Any
 
 try:
@@ -25,7 +26,7 @@ except Exception:  # pragma: no cover - optional dep
     _AVAILABLE = False
 
 
-@contextlib.contextmanager
+@contextmanager
 def span(name: str, /, **attributes: Any):
     """Open a span called ``name`` with the given attributes.
 
@@ -46,10 +47,8 @@ def set_attribute(span_obj: Any, key: str, value: Any) -> None:
     """Set an attribute on an open span if tracing is enabled."""
     if span_obj is None or value is None:
         return
-    try:
+    with suppress(Exception):  # defensive — span backends vary
         span_obj.set_attribute(key, value)
-    except Exception:  # pragma: no cover - defensive
-        pass
 
 
 def is_available() -> bool:

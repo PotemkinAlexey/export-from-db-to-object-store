@@ -13,6 +13,7 @@ wrapper around the uploader, runs the shard and returns
 the metric dicts into its own ``ExportMetrics`` after each shard
 completes so the global summary is correct under both modes.
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,11 +29,10 @@ from .parquet_io import ShardWorker, TransformFn
 from .retry import with_retries
 from .uploaders import resolve_uploader
 
-
 _SCHEMES = {"azure": "azure", "s3": "s3", "gcs": "gs"}
 
 
-def _canonical_uri(uploader_name: str, params: "ShardTaskParams") -> str:
+def _canonical_uri(uploader_name: str, params: ShardTaskParams) -> str:
     """Produce the same ``scheme://container_or_bucket/remote_path`` string
     each backend's ``upload()`` returns, without touching the network."""
     scheme = _SCHEMES.get(uploader_name, uploader_name)

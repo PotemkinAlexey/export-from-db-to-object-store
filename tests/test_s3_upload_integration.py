@@ -1,4 +1,5 @@
 """Integration test: real S3Uploader.upload against moto's in-process S3."""
+
 from __future__ import annotations
 
 import logging

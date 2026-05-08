@@ -1,4 +1,5 @@
 """Tests for the uploader registry and matching logic."""
+
 from __future__ import annotations
 
 import pytest

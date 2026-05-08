@@ -1,4 +1,5 @@
 """Per-shard export metrics with rich log summary."""
+
 from __future__ import annotations
 
 import time

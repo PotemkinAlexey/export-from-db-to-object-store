@@ -1,4 +1,5 @@
 """Jinja rendering for SQL queries and remote/local paths."""
+
 from __future__ import annotations
 
 import logging

@@ -1,4 +1,5 @@
 """Defaults and immutability of option dataclasses."""
+
 from __future__ import annotations
 
 import dataclasses

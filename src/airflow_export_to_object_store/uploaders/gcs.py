@@ -5,6 +5,7 @@ health probe (cheap object write/delete with a fallback to ``get_bucket``)
 and the actual upload (the hook's ``upload()`` method already performs
 resumable multipart uploads for files larger than ~8 MiB and handles auth).
 """
+
 from __future__ import annotations
 
 import logging

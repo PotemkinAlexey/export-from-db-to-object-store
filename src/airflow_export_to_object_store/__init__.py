@@ -1,4 +1,5 @@
 """airflow-export-to-object-store: streaming SQL → Parquet → Azure/S3 Airflow operator."""
+
 from __future__ import annotations
 
 from .db_adapter import UniversalDbAdapter

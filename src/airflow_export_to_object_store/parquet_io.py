@@ -13,6 +13,7 @@ It is intentionally decoupled from the Airflow operator: callers inject an
 ``upload`` callable, the storage hook, the DB adapter factory, options and a
 logger.
 """
+
 from __future__ import annotations
 
 import logging
@@ -214,9 +215,7 @@ class ShardWorker:
         while not self._should_stop():
             now = time.time()
             if now - last_log >= hb_interval:
-                size_mb = (
-                    os.path.getsize(self._temp_path) / 1024 / 1024 if os.path.exists(self._temp_path) else 0.0
-                )
+                size_mb = os.path.getsize(self._temp_path) / 1024 / 1024 if os.path.exists(self._temp_path) else 0.0
                 with self._rows_lock:
                     current = self._rows_written
                 self.log.info("%s Heartbeat: %d rows written (%.1fMB)", self._prefix, current, size_mb)
@@ -243,9 +242,7 @@ class ShardWorker:
                     except Exception as e:
                         # User-supplied transforms run inside the fetch thread; a
                         # bug there must not corrupt the queue or hang the shard.
-                        raise RuntimeError(
-                            f"transform_fn raised on shard {self.shard_index}: {e}"
-                        ) from e
+                        raise RuntimeError(f"transform_fn raised on shard {self.shard_index}: {e}") from e
                     if tbl is None or tbl.num_rows == 0:
                         # Transform may legitimately filter the entire batch; treat
                         # like an empty fetch and try the next chunk.
@@ -390,10 +387,7 @@ class ShardWorker:
         except Exception:
             self.log.warning("%s Schema mismatch — padding null columns", self._prefix)
             return pa.Table.from_arrays(
-                [
-                    tbl.column(n) if n in tbl.schema.names else pa.nulls(tbl.num_rows)
-                    for n in target.names
-                ],
+                [tbl.column(n) if n in tbl.schema.names else pa.nulls(tbl.num_rows) for n in target.names],
                 names=target.names,
             )
 

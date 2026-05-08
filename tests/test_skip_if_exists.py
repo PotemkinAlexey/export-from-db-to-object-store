@@ -1,4 +1,5 @@
 """Idempotency: skip_if_exists short-circuits the shard before any DB work."""
+
 from __future__ import annotations
 
 import logging
@@ -63,8 +64,10 @@ def test_skip_if_exists_short_circuits_without_db(monkeypatch):
     def _fail_get_hook(conn_id):
         db_calls.append(conn_id)
         if conn_id == "storage":
+
             class _Hook:
                 pass
+
             return _Hook()
         raise AssertionError(f"DB hook should never be requested, got {conn_id}")
 
@@ -119,6 +122,4 @@ def test_uploader_exists_implementations_exist():
 )
 def test_exists_returns_false_when_target_missing(uploader_cls, kwargs, expected_uri_prefix):
     """No bucket/container => exists() must be False, never raise."""
-    assert (
-        uploader_cls().exists(object(), remote_path="x", **kwargs) is False
-    )
+    assert uploader_cls().exists(object(), remote_path="x", **kwargs) is False

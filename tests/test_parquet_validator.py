@@ -1,4 +1,5 @@
 """Tests for parquet_validator.validate_parquet_schema."""
+
 from __future__ import annotations
 
 import logging

@@ -1,9 +1,8 @@
 """Third-party uploader registration via importlib.metadata entry points."""
+
 from __future__ import annotations
 
 import logging
-
-import pytest
 
 from airflow_export_to_object_store.uploaders import base as base_mod
 

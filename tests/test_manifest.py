@@ -1,4 +1,5 @@
 """Manifest builder/writer tests (no Airflow needed)."""
+
 from __future__ import annotations
 
 import json

@@ -1,4 +1,5 @@
 """Tests for utils.compute_md5_eff and utils.coerce_ts_table."""
+
 from __future__ import annotations
 
 import hashlib

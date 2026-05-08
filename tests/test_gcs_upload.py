@@ -4,6 +4,7 @@ GCS does not have a moto-equivalent in our default deps, so the upload path
 is exercised against a mocked GCSHook (the boundary we actually depend on)
 and the registry is checked through the public ``resolve_uploader``.
 """
+
 from __future__ import annotations
 
 import logging

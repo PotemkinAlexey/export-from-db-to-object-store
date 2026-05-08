@@ -1,4 +1,5 @@
 """Pure helpers used by the operator: MD5 computation and timestamp coercion."""
+
 from __future__ import annotations
 
 import hashlib

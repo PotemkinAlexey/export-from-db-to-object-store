@@ -1,4 +1,5 @@
 """End-to-end ShardWorker tests using sqlite as a real PEP-249 source."""
+
 from __future__ import annotations
 
 import logging

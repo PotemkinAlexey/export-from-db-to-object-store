@@ -11,6 +11,7 @@ We don't spin up Snowflake — we only test the value-add boundaries:
 * Operator integration boundary (matches() False if db hook is not
   Snowflake).
 """
+
 from __future__ import annotations
 
 import logging
@@ -90,18 +91,14 @@ def test_build_copy_sql_with_integration_uses_clauses():
 
 
 def test_build_copy_sql_with_credentials():
-    s = SnowflakeUnloadStrategy(
-        SnowflakeUnloadOptions(credentials={"AWS_KEY_ID": "k", "AWS_SECRET_KEY": "s"})
-    )
+    s = SnowflakeUnloadStrategy(SnowflakeUnloadOptions(credentials={"AWS_KEY_ID": "k", "AWS_SECRET_KEY": "s"}))
     sql = s._build_copy_sql(target="s3://b/path/", select_sql="SELECT 1")
     assert "CREDENTIALS = (AWS_KEY_ID='k' AWS_SECRET_KEY='s')" in sql
     assert "STORAGE_INTEGRATION" not in sql
 
 
 def test_build_copy_sql_rejects_both_auth_modes():
-    s = SnowflakeUnloadStrategy(
-        SnowflakeUnloadOptions(storage_integration="X", credentials={"AWS_KEY_ID": "y"})
-    )
+    s = SnowflakeUnloadStrategy(SnowflakeUnloadOptions(storage_integration="X", credentials={"AWS_KEY_ID": "y"}))
     with pytest.raises(ValueError, match="storage_integration or credentials"):
         s._build_copy_sql(target="s3://b/", select_sql="SELECT 1")
 
@@ -160,17 +157,13 @@ def test_rows_to_shard_results_handles_dict_rows():
 
 def test_extract_unload_columns_tuple_filename_first():
     """Modern Snowflake driver: (file_name, rows, input_bytes, output_bytes, ...)."""
-    rows_unloaded, output_bytes, file_name = _extract_unload_columns(
-        ("data_0.parquet", 500, 12345, 8192)
-    )
+    rows_unloaded, output_bytes, file_name = _extract_unload_columns(("data_0.parquet", 500, 12345, 8192))
     assert (rows_unloaded, output_bytes, file_name) == (500, 8192, "data_0.parquet")
 
 
 def test_extract_unload_columns_tuple_legacy_order():
     """Legacy: (rows_unloaded, input_bytes, output_bytes, file_name)."""
-    rows_unloaded, output_bytes, file_name = _extract_unload_columns(
-        (500, 12345, 8192, "data_0.parquet")
-    )
+    rows_unloaded, output_bytes, file_name = _extract_unload_columns((500, 12345, 8192, "data_0.parquet"))
     assert (rows_unloaded, output_bytes, file_name) == (500, 8192, "data_0.parquet")
 
 

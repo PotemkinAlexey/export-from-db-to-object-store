@@ -1,4 +1,5 @@
 """IncrementalConfig dataclass + watermark coercion."""
+
 from __future__ import annotations
 
 import datetime as dt
@@ -41,6 +42,8 @@ def test_coerce_watermark_handles_common_db_types():
 
 
 def test_options_are_frozen():
+    import dataclasses
+
     cfg = IncrementalConfig(watermark_now_template="x")
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         cfg.xcom_key = "other"  # type: ignore[misc]

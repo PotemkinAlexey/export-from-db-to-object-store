@@ -4,6 +4,7 @@ Execute SQL via any DB hook (PEP-249 / Airflow Connection) → stream Arrow
 batches → write Parquet → upload to object storage (Azure Blob, AWS S3,
 or Google Cloud Storage).
 """
+
 from __future__ import annotations
 
 import os
@@ -130,7 +131,6 @@ class StreamingExportOperator(BaseOperator):
     # Execute
     # -------------------------------------------------------
     def execute(self, context):
-
         """
         Execute sharded export:
             • Render SQL and paths per shard
@@ -334,9 +334,7 @@ class StreamingExportOperator(BaseOperator):
             watermark_now = coerce_watermark(self._fetch_scalar(rendered)) or watermark_prev
         else:
             assert cfg.watermark_now_template is not None  # enforced by IncrementalConfig
-            watermark_now = self._render_template(
-                cfg.watermark_now_template, dict(context), label="watermark_now"
-            )
+            watermark_now = self._render_template(cfg.watermark_now_template, dict(context), label="watermark_now")
 
         self.log.info("Incremental window: prev=%r → now=%r", watermark_prev, watermark_now)
 
@@ -514,7 +512,7 @@ class StreamingExportOperator(BaseOperator):
             available_gb = mem.available / (1024**3)
 
             self.log.info(
-                f"Memory: total={mem.total / (1024**3):.1f}GB, " f"available={available_gb:.1f}GB, " f"used={mem.percent}%"
+                f"Memory: total={mem.total / (1024**3):.1f}GB, available={available_gb:.1f}GB, used={mem.percent}%"
             )
 
             if available_gb < 2:

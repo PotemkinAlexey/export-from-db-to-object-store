@@ -15,6 +15,7 @@ returns a list of :class:`~..options.ShardResult` describing what
 actually landed in the bucket — so the operator's existing manifest
 writer keeps working unchanged.
 """
+
 from __future__ import annotations
 
 import logging

@@ -19,6 +19,7 @@ The strategy parses the result set Snowflake returns from ``COPY INTO``
 (one row per file) into :class:`ShardResult` objects so the manifest
 writer downstream sees the unload exactly like a sharded fetch run.
 """
+
 from __future__ import annotations
 
 import logging
@@ -143,9 +144,7 @@ class SnowflakeUnloadStrategy:
             kv = " ".join(f"{k}='{v}'" for k, v in opts.credentials.items())
             clauses.append(f"CREDENTIALS = ({kv})")
 
-        clauses.append(
-            f"FILE_FORMAT = (TYPE = {opts.file_format} COMPRESSION = {opts.compression})"
-        )
+        clauses.append(f"FILE_FORMAT = (TYPE = {opts.file_format} COMPRESSION = {opts.compression})")
         clauses.append(f"MAX_FILE_SIZE = {opts.max_file_size}")
         clauses.append(f"SINGLE = {'TRUE' if opts.single else 'FALSE'}")
         clauses.append(f"OVERWRITE = {'TRUE' if opts.overwrite else 'FALSE'}")
@@ -157,11 +156,7 @@ class SnowflakeUnloadStrategy:
         # Ensure we have a tidy single-line copy statement; the SELECT is wrapped
         # in parens so callers can pass any rendered SQL (with WHERE / JOIN / etc).
         select_clean = select_sql.strip().rstrip(";")
-        return (
-            f"COPY INTO '{target}'\n"
-            f"FROM ({select_clean})\n"
-            + "\n".join(clauses)
-        )
+        return f"COPY INTO '{target}'\nFROM ({select_clean})\n" + "\n".join(clauses)
 
 
 # ----------------------------------------------------------------------

@@ -1,4 +1,5 @@
 """Frozen dataclasses describing operator configuration."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

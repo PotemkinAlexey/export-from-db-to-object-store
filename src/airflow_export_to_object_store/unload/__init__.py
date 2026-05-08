@@ -1,4 +1,5 @@
 """Native unload strategies for warehouse → object-store bulk export."""
+
 from __future__ import annotations
 
 from .base import UnloadStrategy

@@ -1,4 +1,5 @@
 """Tests for the with_retries decorator."""
+
 from __future__ import annotations
 
 import logging

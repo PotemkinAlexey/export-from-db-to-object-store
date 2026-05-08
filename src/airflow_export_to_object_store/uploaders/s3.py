@@ -1,4 +1,5 @@
 """AWS S3 uploader using boto3 transfer (automatic multipart)."""
+
 from __future__ import annotations
 
 import logging

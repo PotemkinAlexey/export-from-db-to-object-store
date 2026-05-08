@@ -1,5 +1,6 @@
 """Tracing helper has no observable effect when OTel is missing,
 and emits a real span when it is installed."""
+
 from __future__ import annotations
 
 import pytest

@@ -1,4 +1,5 @@
 """Per-shard timeout: a slow cursor must not run forever."""
+
 from __future__ import annotations
 
 import logging
