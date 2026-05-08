@@ -27,6 +27,7 @@ from .templating import (
     flatten_and_render_params as _flatten_and_render_params,
 )
 from .templating import render_path_template, render_template
+from .unload import UnloadStrategy
 from .uploaders import resolve_uploader
 from .utils import coerce_ts_table, compute_md5_eff
 
@@ -79,6 +80,8 @@ class StreamingExportOperator(BaseOperator):
         skip_if_exists: bool = False,
         write_manifest: bool = False,
         manifest_path: str | None = None,
+        unload_strategy: UnloadStrategy | None = None,
+        unload_dir_template: str = "{{ ds }}/",
         **kwargs,
     ):
 
@@ -111,6 +114,8 @@ class StreamingExportOperator(BaseOperator):
         self.skip_if_exists = skip_if_exists
         self.write_manifest = write_manifest
         self.manifest_path = manifest_path
+        self.unload_strategy = unload_strategy
+        self.unload_dir_template = unload_dir_template
 
         # === NEW: metrics object ===
         self._metrics = ExportMetrics(self)
@@ -134,6 +139,30 @@ class StreamingExportOperator(BaseOperator):
         self._health_checks(context)
 
         self._metrics.start()
+
+        # Native unload bypass: ask the warehouse to write directly to the
+        # bucket instead of streaming through this process.
+        if self.unload_strategy is not None:
+            results, unload_dir = self._run_unload(context)
+            if self.write_manifest:
+                self._write_manifest_at(results, unload_dir)
+            elapsed = time.time() - t0
+            summary = self._metrics.summary()
+            self.log.info(
+                "Native unload completed in %.2fs — rows=%d bytes=%.1fMB",
+                elapsed,
+                summary.get("total_rows", 0),
+                summary.get("total_bytes_mb", 0),
+            )
+            return {
+                "shards": [r.__dict__ for r in sorted(results, key=lambda x: x.shard_index)],
+                "metrics": summary,
+                "total_rows": summary.get("total_rows", 0),
+                "total_bytes": summary.get("total_bytes", 0),
+                "elapsed_s": elapsed,
+                "mode": "unload",
+            }
+
         shard_params: list[ShardTaskParams] = []
 
         # Prepare each shard
@@ -252,6 +281,74 @@ class StreamingExportOperator(BaseOperator):
 
         # All slots are now non-None.
         return [r for r in results if r is not None]
+
+    # ------------------------------------------------------------------
+    # NATIVE UNLOAD
+    # ------------------------------------------------------------------
+    def _run_unload(self, context: dict[str, Any]) -> tuple[list[ShardResult], str]:
+        """Delegate to the warehouse-native bulk export strategy.
+
+        We render a single SQL (no shards: the warehouse parallelises)
+        and a single remote directory, then ask the strategy to produce
+        ``ShardResult``\\s for each file the warehouse wrote. Returns the
+        results plus the resolved remote directory (used by the manifest
+        writer in unload mode).
+        """
+        sql = self.query or self._render_template(self.sql_template, dict(context), "SQL")
+        remote_dir = self._render_template_str(self.unload_dir_template, dict(context))
+
+        db_hook = BaseHook.get_hook(self.db_hook_id)
+        storage_hook = BaseHook.get_hook(self.storage_hook_id)
+
+        if not self.unload_strategy.matches(db_hook, storage_hook):
+            raise ValueError(
+                f"unload_strategy {type(self.unload_strategy).__name__} does not match "
+                f"the configured db_hook ({type(db_hook).__name__}) and storage_hook "
+                f"({type(storage_hook).__name__})."
+            )
+
+        results = self.unload_strategy.unload(
+            db_hook=db_hook,
+            storage_hook=storage_hook,
+            sql=sql,
+            remote_dir=remote_dir,
+            container=self.container,
+            bucket=self.bucket,
+            log=self.log,
+        )
+
+        # Backfill the global metrics so summary() stays consistent across
+        # streaming and unload modes.
+        for r in results:
+            self._metrics.record_shard(r.shard_index, r.rows, r.bytes, r.elapsed_s)
+
+        return results, remote_dir
+
+    def _write_manifest_at(self, results: list[ShardResult], remote_dir: str) -> None:
+        """Manifest writer for native unload: directory is known up-front."""
+        if not results:
+            self.log.info("Skipping manifest: unload produced no files.")
+            return
+        manifest_remote = self.manifest_path or (remote_dir.rstrip("/") + "/_manifest.json").lstrip("/")
+        manifest = build_manifest(results)
+        with tempfile.TemporaryDirectory() as td:
+            local = os.path.join(td, "_manifest.json")
+            size = write_manifest_local(manifest, local)
+            self.log.info("Manifest %d bytes → %s", size, manifest_remote)
+
+            storage_hook = BaseHook.get_hook(self.storage_hook_id)
+            uploader = resolve_uploader(storage_hook)
+            uri = uploader.upload(
+                storage_hook,
+                local,
+                manifest_remote,
+                container=self.container,
+                bucket=self.bucket,
+                overwrite=True,
+                storage_hook_id=self.storage_hook_id,
+                log=self.log,
+            )
+            self.log.info("Manifest uploaded → %s", uri)
 
     # ------------------------------------------------------------------
     # MANIFEST

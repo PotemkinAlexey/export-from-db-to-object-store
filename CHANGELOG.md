@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-08
+
+### Added
+- **Native unload (warehouse → bucket)**. When the warehouse can write
+  Parquet directly to object storage, streaming through this process is
+  10–50× slower than asking it to do so server-side. The new
+  ``unload_strategy=`` parameter delegates the export to the warehouse:
+  * Snowflake: ``SnowflakeUnloadStrategy`` issues
+    ``COPY INTO '<location>' FROM (SELECT ...)`` with the user's
+    ``SnowflakeUnloadOptions`` (storage integration *or* inline
+    credentials, file format, compression, ``MAX_FILE_SIZE``,
+    ``SINGLE``, ``OVERWRITE``, plus an ``extra_options`` escape hatch).
+  * S3 and GCS targets are supported today; Azure requires the storage
+    account name (raised explicitly until someone wires it).
+- The strategy parses ``COPY INTO``'s result rows into ``ShardResult``
+  objects, so the existing manifest writer keeps working unchanged in
+  unload mode.
+- New ``unload_dir_template`` operator parameter (defaults to
+  ``"{{ ds }}/"``) controls the destination prefix for unload mode.
+- New ``unload`` package: ``UnloadStrategy`` Protocol,
+  ``SnowflakeUnloadStrategy``, ``SnowflakeUnloadOptions``.
+
+### Changed
+- ``snowflake`` extra now also pulls in
+  ``apache-airflow-providers-snowflake`` so the SnowflakeHook is
+  available without juggling extras.
+- CI installs the ``snowflake`` extra alongside ``s3`` and ``gcs``.
+
 ## [0.5.0] - 2026-05-08
 
 ### Added

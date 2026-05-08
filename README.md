@@ -129,6 +129,52 @@ shard paths (or at `manifest_path` if you set it explicitly):
 Downstream readers (Athena, Trino, Spark, schema registries) can act on
 the manifest atomically without listing the bucket.
 
+## Native unload (warehouse → bucket, server-side)
+
+Streaming through this process is fine for tens of millions of rows. For
+hundreds of millions or terabytes, ask the warehouse to write Parquet
+**directly** to the bucket — orders of magnitude faster, no client-side
+fetch at all.
+
+```python
+from airflow_export_to_object_store import StreamingExportOperator
+from airflow_export_to_object_store.unload import (
+    SnowflakeUnloadOptions,
+    SnowflakeUnloadStrategy,
+)
+
+StreamingExportOperator(
+    task_id="export_orders_native",
+    db_hook_id="snowflake_default",
+    storage_hook_id="aws_default",
+    bucket="my-data-lake",
+    sql_template="SELECT * FROM orders WHERE date = '{{ ds }}'",
+    unload_dir_template="orders/{{ ds }}/",   # files go here
+    write_manifest=True,                       # _manifest.json next to them
+    unload_strategy=SnowflakeUnloadStrategy(
+        SnowflakeUnloadOptions(
+            storage_integration="MY_S3_INT",   # preferred, set by Snowflake admin
+            compression="ZSTD",
+            max_file_size=256 * 1024 * 1024,   # ~256 MiB per file
+        ),
+    ),
+)
+```
+
+The strategy:
+* runs `COPY INTO 's3://bucket/orders/{{ ds }}/' FROM (...)` on Snowflake's
+  warehouses (parallelised across compute nodes),
+* parses the result set so each produced file becomes one `ShardResult`,
+* feeds the same manifest writer used by the streaming path.
+
+Auth: prefer `storage_integration` over inline `credentials={...}` —
+the integration is set up by a Snowflake admin once and zero secrets
+cross the SQL boundary.
+
+Today the Snowflake strategy supports S3 and GCS targets out of the box;
+Azure unload requires the storage account name (open an issue with your
+setup if you need it).
+
 ## Configuration objects
 
 | Object | Key fields |
