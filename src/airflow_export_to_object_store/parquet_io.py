@@ -15,7 +15,6 @@ logger.
 """
 from __future__ import annotations
 
-import contextlib
 import logging
 import os
 import queue
@@ -23,7 +22,7 @@ import shutil
 import tempfile
 import threading
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from typing import Any, Callable
 
 import pyarrow as pa
@@ -298,7 +297,7 @@ class ShardWorker:
             return current_chunk
 
     def _safe_put_sentinel(self) -> None:
-        with contextlib.suppress(Exception):
+        with suppress(Exception):
             self._queue.put_nowait(None)
 
     def _drain_queue(self) -> None:
