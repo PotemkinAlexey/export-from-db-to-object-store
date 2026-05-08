@@ -6,14 +6,12 @@ Execute SQL via any DB hook (PEP-249 / Airflow Connection) → stream Arrow batc
 """
 from __future__ import annotations
 
-import mimetypes
 import os
 import queue
 import shutil
 import tempfile
 import threading
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from typing import Any, Dict, List, Optional
@@ -33,22 +31,8 @@ from .templating import (
     render_path_template,
     render_template,
 )
+from .uploaders import resolve_uploader
 from .utils import coerce_ts_table, compute_md5_eff
-
-try:
-    from airflow.providers.microsoft.azure.hooks.wasb import WasbHook
-except ImportError:
-    WasbHook = None
-
-try:
-    from airflow.providers.amazon.aws.hooks.s3 import S3Hook
-except ImportError:
-    S3Hook = None
-
-try:
-    from azure.storage.blob import ContentSettings
-except (ImportError, ModuleNotFoundError):
-    ContentSettings = None
 
 
 class StreamingExportOperator(BaseOperator):
@@ -535,195 +519,44 @@ class StreamingExportOperator(BaseOperator):
     # ------------------------------------------------------------------
     # UPLOAD WITH RETRIES
     # ------------------------------------------------------------------
-    def is_aws_generic_hook(self, storage_hook):
-        """
-        Detects whether storage_hook is an AWS-based hook
-        even if AwsGenericHook cannot be imported (old Airflow, custom providers).
-        """
-        # 1) Try direct import (Airflow >= 2.3+)
-        try:
-            from airflow.providers.amazon.aws.hooks.base_aws import AwsGenericHook
-
-            if isinstance(storage_hook, AwsGenericHook):
-                return True
-        except Exception:
-            pass
-
-        # 2) Fallback detection by class name (covers custom providers, proxies, older versions)
-        cls = type(storage_hook).__name__.lower()
-        if "aws" in cls and "hook" in cls:
-            return True
-
-        # 3) Raw type string match (very defensive)
-        if "AwsGenericHook" in str(type(storage_hook)):
-            return True
-
-        return False
-
     @with_retries
     def _upload(self, storage_hook: Any, local_path: str, remote_path: str) -> str:
-        """
-        Unified upload entry point.
-        Routes to the correct backend:
-          - AWS S3 (any file size) → automatic multipart via boto3.s3.transfer.UploadFile
-          - Azure Blob Storage:
-                <5GB  → simple upload
-                >5GB  → block-blob multipart upload
-        """
-        size = os.path.getsize(local_path)
-
-        # --------------------------------------------------
-        # AZURE BLOB STORAGE
-        # --------------------------------------------------
-        if WasbHook and isinstance(storage_hook, WasbHook):
-            if not self.container:
-                raise ValueError("Container must be set for Azure uploads")
-
-            if size < 5 * 1024**3:
-                return self._upload_azure_simple(storage_hook, local_path, remote_path)
-            else:
-                self.log.info("Azure large file detected (%.1f GB) → block upload", size / 1024**3)
-                return self._upload_azure_block(storage_hook, local_path, remote_path)
-
-        # --------------------------------------------------
-        # AWS S3 (S3Hook or AwsGenericHook)
-        # --------------------------------------------------
-        is_s3 = S3Hook and isinstance(storage_hook, S3Hook)
-        is_aws_generic = self.is_aws_generic_hook(storage_hook)
-
-        if is_s3 or is_aws_generic:
-            # Single unified S3 uploader (uses boto3 automatic multipart)
-            return self._upload_s3_unified(storage_hook, local_path, remote_path)
-
-        # --------------------------------------------------
-        # UNSUPPORTED STORAGE
-        # --------------------------------------------------
-        raise NotImplementedError(f"Unsupported storage hook: {type(storage_hook)}")
-
-    def _upload_s3_unified(self, storage_hook, local_path, remote_path):
-        import boto3
-        from boto3.s3.transfer import TransferConfig
-        from botocore.config import Config
-
-        self.log.info("S3 unified upload: %s → %s", local_path, remote_path)
-
-        # Resolve bucket
-        bucket = self.bucket or getattr(storage_hook, "bucket_name", None)
-        if not bucket:
-            raise ValueError("bucket must be set for S3 uploads")
-
-        # Get S3 client
-        if isinstance(storage_hook, S3Hook):
-            s3 = storage_hook.get_conn()
-        else:
-            aws_conn = BaseHook.get_connection(self.storage_hook_id)
-            session = boto3.session.Session(
-                aws_access_key_id=aws_conn.login,
-                aws_secret_access_key=aws_conn.password,
-                region_name=aws_conn.extra_dejson.get("region_name"),
-            )
-            s3 = session.client(
-                "s3",
-                config=Config(
-                    retries={"max_attempts": 10, "mode": "standard"},
-                    connect_timeout=60,
-                    read_timeout=60,
-                ),
-            )
-
-        # AWS-managed automatic multipart
-        transfer_cfg = TransferConfig(
-            multipart_threshold=64 * 1024 * 1024,
-            multipart_chunksize=64 * 1024 * 1024,
-            max_concurrency=8,
-            use_threads=True,
+        uploader = resolve_uploader(storage_hook)
+        return uploader.upload(
+            storage_hook,
+            local_path,
+            remote_path,
+            container=self.container,
+            bucket=self.bucket,
+            overwrite=self.overwrite,
+            storage_hook_id=self.storage_hook_id,
+            log=self.log,
         )
-
-        s3.upload_file(
-            Filename=local_path,
-            Bucket=bucket,
-            Key=remote_path,
-            Config=transfer_cfg,
-        )
-
-        return f"s3://{bucket}/{remote_path}"
-
-    def _upload_azure_simple(self, storage_hook, local_path, remote_path):
-        self.log.info("Azure simple upload: %s → %s", local_path, remote_path)
-
-        client = storage_hook.get_conn()
-        blob = client.get_blob_client(container=self.container, blob=remote_path)
-
-        content_type = mimetypes.guess_type(local_path)[0] or "application/octet-stream"
-        cs = ContentSettings(content_type=content_type) if ContentSettings else None
-
-        with open(local_path, "rb") as f:
-            if cs:
-                blob.upload_blob(f, overwrite=self.overwrite, content_settings=cs)
-            else:
-                blob.upload_blob(f, overwrite=self.overwrite)
-
-        return f"azure://{self.container}/{remote_path}"
-
-    def _upload_azure_block(self, storage_hook, local_path, remote_path):
-        self.log.info("Azure block upload for large file: %s", local_path)
-
-        client = storage_hook.get_conn()
-        blob = client.get_blob_client(container=self.container, blob=remote_path)
-
-        block_size = 100 * 1024 * 1024  # 100MB per block
-        blocks = []
-        idx = 0
-
-        with open(local_path, "rb") as f:
-            while True:
-                chunk = f.read(block_size)
-                if not chunk:
-                    break
-                block_id = f"{idx:08d}"
-                blocks.append(block_id)
-                self.log.info("Azure uploading block %s (%d MB)", block_id, len(chunk) / (1024**2))
-                blob.stage_block(block_id=block_id, data=chunk)
-                idx += 1
-
-        blob.commit_block_list(blocks)
-
-        return f"azure://{self.container}/{remote_path}"
 
     # ------------------------------------------------------------------
     # HEALTH CHECKS
     # ------------------------------------------------------------------
-    def _network_health_check(self, storage_hook):
-        """Check network connectivity only for the actual storage backend."""
+    def _network_health_check(self, uploader) -> None:
+        """Probe TCP reachability for the resolved uploader's known endpoints."""
         import socket
 
-        checks = []
-
-        # Azure
-        if WasbHook and isinstance(storage_hook, WasbHook):
-            checks.append(("Azure", "blob.core.windows.net", 443))
-
-        # AWS S3 (S3Hook or AwsGenericHook)
-        if (S3Hook and isinstance(storage_hook, S3Hook)) or self.is_aws_generic_hook(storage_hook):
-            checks.append(("AWS S3", "s3.amazonaws.com", 443))
-
-        if not checks:
-            self.log.info("No known storage type → skipping network health checks.")
+        targets = list(uploader.network_targets())
+        if not targets:
+            self.log.info("No network targets for %s → skipping network health checks.", uploader.name)
             return
 
-        for service, host, port in checks:
+        for host, port in targets:
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(3)
                 result = sock.connect_ex((host, port))
                 sock.close()
-
                 if result == 0:
-                    self.log.info(f"🌐 Network OK → {service}")
+                    self.log.info("🌐 Network OK → %s (%s:%d)", uploader.name, host, port)
                 else:
-                    self.log.warning(f"⚠ Network may be limited for {service} ({host})")
+                    self.log.warning("⚠ Network may be limited for %s (%s:%d)", uploader.name, host, port)
             except Exception as e:
-                self.log.warning(f"Network check failed for {service}: {e}")
+                self.log.warning("Network check failed for %s (%s): %s", uploader.name, host, e)
 
     def _memory_health_check(self):
         """Check available memory before starting export."""
@@ -766,80 +599,29 @@ class StreamingExportOperator(BaseOperator):
             self.log.warning("Temp cleanup failed: %s", e)
 
     def _health_checks(self, context):
-        """
-        Validate storage connection, bucket/container accessibility,
-        and available local disk space.
-        """
-
+        """Validate storage reachability, backend permissions, and local disk space."""
         try:
             storage_hook = BaseHook.get_hook(self.storage_hook_id)
+            uploader = resolve_uploader(storage_hook)
 
-            self._network_health_check(storage_hook)
+            self._network_health_check(uploader)
             self._memory_health_check()
-            self.log.info("Performing health checks...")
-            # ----------------------------------------
-            # Azure health check
-            # ----------------------------------------
+            self.log.info("Performing %s health checks...", uploader.name)
 
-            if WasbHook and isinstance(storage_hook, WasbHook):
-                if not self.container:
-                    raise ValueError("Container must be specified for Azure storage")
-
-                client = storage_hook.get_conn()
-                container_client = client.get_container_client(self.container)
-
-                try:
-                    test_blob = container_client.get_blob_client(f"_healthcheck_tmp_{uuid.uuid4().hex}")
-
-                    # 1) Try WRITE permission
-                    try:
-                        test_blob.upload_blob(b"test", overwrite=True)
-                        test_blob.delete_blob()
-                        self.log.info("Azure health check OK ✓ (write/delete allowed)")
-                        return
-                    except Exception:
-                        pass  # Maybe read-only, continue
-
-                    # 2) Try READ permission
-                    try:
-                        _ = next(container_client.list_blobs(results_per_page=1), None)
-                        self.log.info("Azure health check OK ✓ (read-only allowed)")
-                        return
-                    except Exception:
-                        pass  # Maybe write-only, continue
-
-                    # 3) Try GET properties on container (works with write-only SAS)
-                    try:
-                        _ = container_client.get_container_properties()
-                        self.log.info("Azure health check OK ✓ (write-only SAS)")
-                        return
-                    except Exception:
-                        pass
-
-                    # 4) Everything failed
-                    raise RuntimeError("Azure health check failed: neither read nor write allowed")
-
-                except Exception as e:
-                    self.log.error("Azure health check FAILED: %s", e)
-                    raise
-
-            # ----------------------------------------
-            # S3 health check
-            # ----------------------------------------
-            elif S3Hook and isinstance(storage_hook, S3Hook):
-                bucket = self.bucket or getattr(storage_hook, "bucket_name", None)
-                if not bucket:
-                    raise ValueError("S3 bucket must be specified")
-                conn = storage_hook.get_conn()
-                conn.head_bucket(Bucket=bucket)
-
+            try:
+                uploader.health_check(
+                    storage_hook,
+                    container=self.container,
+                    bucket=self.bucket,
+                    log=self.log,
+                )
+            except Exception as e:
+                self.log.error("%s health check FAILED: %s", uploader.name, e)
+                raise
         except Exception as e:
             self.log.error("Storage health check FAILED: %s", e)
             raise
 
-        # ----------------------------------------
-        # Disk space check
-        # ----------------------------------------
         tmp_dir = self.tmp_dir or tempfile.gettempdir()
         try:
             stat = shutil.disk_usage(tmp_dir)
