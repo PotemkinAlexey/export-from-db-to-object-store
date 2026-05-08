@@ -35,7 +35,6 @@ from .options import ParquetOptions, ShardOptions, ShardResult
 from .parquet_validator import validate_parquet_schema
 from .utils import coerce_ts_table, compute_md5_eff
 
-
 UploadFn = Callable[[Any, str, str], str]
 """(storage_hook, local_path, remote_path) -> remote URI"""
 
