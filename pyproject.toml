@@ -1,0 +1,102 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "airflow-export-to-object-store"
+version = "0.1.0"
+description = "Universal streaming Airflow operator: SQL DB → Arrow → Parquet → Azure Blob / AWS S3."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+authors = [
+    { name = "Potemkin Alexey", email = "potemkin_81@ukr.net" },
+]
+keywords = [
+    "airflow",
+    "etl",
+    "parquet",
+    "export",
+    "azure-blob",
+    "aws-s3",
+    "snowflake",
+    "postgres",
+    "databricks",
+    "teradata",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Plugins",
+    "Framework :: Apache Airflow",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "apache-airflow>=2.5",
+    "pyarrow>=10.0",
+    "jinja2>=3.0",
+]
+
+[project.optional-dependencies]
+azure = [
+    "apache-airflow-providers-microsoft-azure>=6.0",
+    "azure-storage-blob>=12.0",
+]
+s3 = [
+    "apache-airflow-providers-amazon>=8.0",
+    "boto3>=1.26",
+]
+postgres = ["psycopg2-binary>=2.9"]
+snowflake = ["snowflake-connector-python>=3.0"]
+databricks = ["databricks-sql-connector>=2.9"]
+teradata = ["teradatasql>=17.20"]
+memcheck = ["psutil>=5.9"]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "moto[s3]>=4.2",
+    "ruff>=0.4",
+    "mypy>=1.8",
+    "pre-commit>=3.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/PotemkinAlexey/export-from-db-to-object-store"
+Repository = "https://github.com/PotemkinAlexey/export-from-db-to-object-store"
+Issues = "https://github.com/PotemkinAlexey/export-from-db-to-object-store/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/airflow_export_to_object_store"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/airflow_export_to_object_store",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
