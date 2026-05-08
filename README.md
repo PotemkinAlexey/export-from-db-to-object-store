@@ -94,7 +94,36 @@ StreamingExportOperator(
 |---|---|
 | `ParquetOptions` | `compression`, `row_group_size`, `coerce_timestamps`, `write_statistics`, `use_dictionary` |
 | `RetryOptions` | `upload_retries`, `backoff_base`, `backoff_cap` |
-| `ShardOptions` | `max_workers`, `chunk_rows`, `memory_limit_mb`, `timeout` |
+| `ShardOptions` | `max_workers`, `chunk_rows`, `memory_limit_mb`, `timeout`, `execution_mode` |
+
+## Concurrency model
+
+By default (`execution_mode="threads"`) shards run on a `ThreadPoolExecutor`
+inside the Airflow task process. The hot path — DB I/O, Arrow batch
+construction, dictionary decode, schema cast, zstd-compressed Parquet writes,
+and cloud uploads — all release the GIL because it lives in C/C++ extensions
+(PyArrow, hashlib, boto3/azure-storage/google-cloud network libs). Threads
+therefore scale on real workloads while keeping a single Airflow process,
+shared connection pool, and trivial log capture.
+
+When any shard fails, the operator sets a shared cancellation `Event`; running
+shards observe it on the next iteration of fetch / write / queue-put, drop
+their in-flight batch, and exit promptly without uploading. Failed task time
+is bounded by one chunk's runtime instead of the slowest survivor.
+
+Set `execution_mode="processes"` when you need hard isolation between
+shards — typically for memory-leaky DB drivers, or when one shard's OOM
+must not take down the rest. In that mode the operator uses a
+`ProcessPoolExecutor`. Trade-offs:
+
+- **Memory**: each subprocess re-imports Airflow + PyArrow + driver
+  (≈ 200–500 MiB resident).
+- **No cross-shard cancellation**: `threading.Event` is process-local, so
+  already-running shards in subprocesses run to completion. Only
+  not-yet-started futures are cancelled.
+- **Pickling**: shard parameters and `ShardResult` cross the process
+  boundary as pickles. Both are simple frozen dataclasses, so this is
+  cheap, but custom subclasses must be picklable too.
 
 ## Output (XCom)
 

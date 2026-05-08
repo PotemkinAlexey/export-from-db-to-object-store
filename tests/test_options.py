@@ -35,6 +35,12 @@ def test_shard_defaults():
     assert s.chunk_rows == 50_000
     assert s.memory_limit_mb == 1024
     assert s.timeout is None
+    assert s.execution_mode == "threads"
+
+
+def test_shard_execution_mode_processes():
+    s = ShardOptions(execution_mode="processes")
+    assert s.execution_mode == "processes"
 
 
 def test_options_are_frozen():

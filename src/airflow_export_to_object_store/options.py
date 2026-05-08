@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
+
+ExecutionMode = Literal["threads", "processes"]
 
 
 @dataclass(frozen=True)
@@ -26,6 +29,14 @@ class ShardOptions:
     chunk_rows: int = 50_000
     memory_limit_mb: int = 1024
     timeout: float | None = None
+    # ``threads`` (default): shards run in a ThreadPoolExecutor. The hot path
+    # (Arrow / Parquet / cloud-IO) releases the GIL so threads scale well and
+    # share a single Airflow process.
+    # ``processes``: shards run in a ProcessPoolExecutor. Use when shards must
+    # be hard-isolated (leaky DB drivers, per-shard memory pressure, etc.).
+    # Costs: 200–500 MB resident per worker and round-trip pickling of inputs
+    # and ShardResult.
+    execution_mode: ExecutionMode = "threads"
 
 
 @dataclass(frozen=True)

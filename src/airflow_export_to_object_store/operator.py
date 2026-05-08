@@ -9,8 +9,9 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_EXCEPTION, ProcessPoolExecutor, ThreadPoolExecutor, wait
 from typing import Any
 
 import pyarrow as pa
@@ -19,9 +20,8 @@ from airflow.models import BaseOperator
 
 from .metrics import ExportMetrics
 from .options import ParquetOptions, RetryOptions, ShardOptions, ShardResult
-from .parquet_io import ShardWorker
 from .parquet_validator import validate_parquet_schema
-from .retry import with_retries
+from .shard_task import ShardTaskParams, execute_shard
 from .templating import (
     flatten_and_render_params as _flatten_and_render_params,
 )
@@ -127,34 +127,37 @@ class StreamingExportOperator(BaseOperator):
         self._health_checks(context)
 
         self._metrics.start()
-        tasks = []
+        shard_params: list[ShardTaskParams] = []
 
         # Prepare each shard
         for idx, shard in enumerate(self.shards):
             shard_ctx = {**context, **self.sql_params, **shard, "shard_index": idx}
 
             sql_text = self.query or self._render_template(self.sql_template, shard_ctx, "SQL")
-
             filename = self._render_template_str(self.filename_template, shard_ctx)
             remote_path = self._render_template_str(self.remote_path_template, shard_ctx)
 
-            tasks.append((idx, sql_text, filename, remote_path))
+            shard_params.append(
+                ShardTaskParams(
+                    shard_index=idx,
+                    sql_text=sql_text,
+                    filename=filename,
+                    remote_path=remote_path,
+                    db_hook_id=self.db_hook_id,
+                    storage_hook_id=self.storage_hook_id,
+                    tmp_dir=self.tmp_dir,
+                    container=self.container,
+                    bucket=self.bucket,
+                    overwrite=self.overwrite,
+                    compute_md5=self.compute_md5,
+                    validate_parquet=self.validate_parquet,
+                    parquet_options=self.parquet_options,
+                    shard_options=self.shard_options,
+                    retry_options=self.retry_options,
+                )
+            )
 
-        from concurrent.futures import FIRST_EXCEPTION, wait
-
-        with ThreadPoolExecutor(max_workers=self.shard_options.max_workers) as pool:
-            futures = [pool.submit(self._run_single_shard_task, *task) for task in tasks]
-
-            done, not_done = wait(futures, return_when=FIRST_EXCEPTION)
-
-            for future in done:
-                if future.exception():
-                    for f in not_done:
-                        f.cancel()
-                    raise future.exception()
-
-            results = [f.result() for f in futures]
-
+        results = self._run_shards(shard_params)
         elapsed = time.time() - t0
 
         summary = self._metrics.summary()
@@ -180,55 +183,63 @@ class StreamingExportOperator(BaseOperator):
         return _flatten_and_render_params(data, ctx)
 
     # ------------------------------------------------------------------
-    # Run a single shard
+    # Shard orchestration: pool selection + cancellation propagation.
     # ------------------------------------------------------------------
+    def _run_shards(self, shard_params: list[ShardTaskParams]) -> list[ShardResult]:
+        mode = self.shard_options.execution_mode
+        max_workers = self.shard_options.max_workers
 
-    def _run_single_shard_task(self, shard_index, sql_text, filename, remote_path):
-        storage_hook = BaseHook.get_hook(self.storage_hook_id)
-        return self._run_single_shard(shard_index, storage_hook, sql_text, filename, remote_path)
+        if mode == "threads":
+            cancel = threading.Event()
+            pool = ThreadPoolExecutor(max_workers=max_workers)
+        elif mode == "processes":
+            cancel = None  # threading.Event cannot cross process boundaries
+            pool = ProcessPoolExecutor(max_workers=max_workers)
+        else:  # pragma: no cover - guarded by Literal
+            raise ValueError(f"Unknown execution_mode: {mode}")
 
-    def _run_single_shard(
-        self,
-        shard_index: int,
-        storage_hook: Any,
-        sql_text: str,
-        filename: str,
-        remote_path: str,
-    ) -> ShardResult:
-        worker = ShardWorker(
-            shard_index=shard_index,
-            sql_text=sql_text,
-            filename=filename,
-            remote_path=remote_path,
-            db_hook_id=self.db_hook_id,
-            storage_hook=storage_hook,
-            tmp_dir_root=self.tmp_dir,
-            parquet_options=self.parquet_options,
-            shard_options=self.shard_options,
-            compute_md5=self.compute_md5,
-            validate_parquet=self.validate_parquet,
-            upload_fn=self._upload,
-            metrics=self._metrics,
-            log=self.log,
-        )
-        return worker.run()
+        self.log.info("Running %d shard(s) on %s pool (max_workers=%d)", len(shard_params), mode, max_workers)
 
-    # ------------------------------------------------------------------
-    # UPLOAD WITH RETRIES
-    # ------------------------------------------------------------------
-    @with_retries
-    def _upload(self, storage_hook: Any, local_path: str, remote_path: str) -> str:
-        uploader = resolve_uploader(storage_hook)
-        return uploader.upload(
-            storage_hook,
-            local_path,
-            remote_path,
-            container=self.container,
-            bucket=self.bucket,
-            overwrite=self.overwrite,
-            storage_hook_id=self.storage_hook_id,
-            log=self.log,
-        )
+        futures_to_index: dict[Any, int] = {}
+        results: list[ShardResult | None] = [None] * len(shard_params)
+
+        try:
+            for params in shard_params:
+                if mode == "threads":
+                    future = pool.submit(execute_shard, params, cancel)
+                else:
+                    future = pool.submit(execute_shard, params)
+                futures_to_index[future] = params.shard_index
+
+            done, not_done = wait(list(futures_to_index), return_when=FIRST_EXCEPTION)
+
+            first_exc: BaseException | None = None
+            for future in done:
+                exc = future.exception()
+                if exc is not None and first_exc is None:
+                    first_exc = exc
+
+            if first_exc is not None:
+                self.log.warning("Shard failure detected — cancelling siblings: %s", first_exc)
+                if cancel is not None:
+                    cancel.set()
+                for f in not_done:
+                    f.cancel()
+                # Wait for already-running shards to finish (cleanly, since cancel
+                # is set in threads mode; in processes mode they run to completion).
+                wait(not_done)
+                raise first_exc
+
+            for future, idx in futures_to_index.items():
+                shard_result, shard_metric = future.result()
+                results[idx] = shard_result
+                if shard_metric:
+                    self._metrics.shards.append(shard_metric)
+        finally:
+            pool.shutdown(wait=True)
+
+        # All slots are now non-None.
+        return [r for r in results if r is not None]
 
     # ------------------------------------------------------------------
     # HEALTH CHECKS

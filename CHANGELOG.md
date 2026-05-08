@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-08
+
+### Added
+- Cross-shard cancellation. The operator owns a single `threading.Event`
+  in thread mode; on the first failed shard it sets the event, cancels
+  not-yet-started futures, and waits for in-flight shards to exit.
+  Each `ShardWorker` checks `_should_stop()` in fetch/write/heartbeat
+  loops and exits without uploading partial files.
+- `ShardOptions.execution_mode = "threads" | "processes"`. The default
+  remains `"threads"`. `"processes"` switches the operator to a
+  `ProcessPoolExecutor` for hard isolation between shards (leaky
+  drivers, unbounded memory growth). Trade-offs documented in README.
+- New `shard_task.py` module: `ShardTaskParams` (frozen, picklable) and
+  a top-level `execute_shard(params, cancel)` function that both
+  executors target. The retry-decorated upload now lives here too.
+
+### Changed
+- Operator no longer holds the upload method directly; per-shard metrics
+  are returned from `execute_shard` and merged into `ExportMetrics` after
+  each shard completes (so process-mode shards report metrics back to
+  the parent operator).
+- Linter cleanup: `Callable` imported from `collections.abc` instead of
+  `typing` (ruff UP035) and import order tightened in `parquet_io.py`.
+
 ## [0.3.0] - 2026-05-08
 
 ### Added

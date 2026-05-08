@@ -22,8 +22,9 @@ import shutil
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from contextlib import ExitStack, suppress
-from typing import Any, Callable
+from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -67,6 +68,7 @@ class ShardWorker:
         metrics: ExportMetrics,
         log: logging.Logger,
         db_adapter_factory: DbAdapterFactory = _default_adapter_factory,
+        cancel: threading.Event | None = None,
     ) -> None:
         self.shard_index = shard_index
         self.sql_text = sql_text
@@ -87,10 +89,17 @@ class ShardWorker:
         self._prefix = f"[Shard {shard_index}]"
         self._queue: queue.Queue[pa.Table | None] = queue.Queue(maxsize=2)
         self._stop = threading.Event()
+        # External cancellation signal shared across shards (set by the operator
+        # when any other shard fails). The shard treats it like its own _stop.
+        self._cancel = cancel
         self._errors: list[Exception] = []
         self._rows_lock = threading.Lock()
         self._rows_written = 0
         self._temp_path: str = ""
+
+    def _should_stop(self) -> bool:
+        """True when this shard's local stop or the external cancel was raised."""
+        return self._stop.is_set() or (self._cancel is not None and self._cancel.is_set())
 
     # ------------------------------------------------------------------
     # Entry point
@@ -129,6 +138,14 @@ class ShardWorker:
             if self._errors:
                 raise self._errors[0]
 
+            # If the operator cancelled this shard mid-flight, exit early without
+            # validating/uploading a partial file.
+            if self._cancel is not None and self._cancel.is_set():
+                elapsed = time.time() - start
+                self.log.info("%s Cancelled — skipping upload", self._prefix)
+                self.metrics.record_shard(self.shard_index, self._rows_written, 0, elapsed)
+                return ShardResult(self.shard_index, "", self._rows_written, 0, None, elapsed)
+
             return self._finalize(start)
 
     # ------------------------------------------------------------------
@@ -153,7 +170,7 @@ class ShardWorker:
     def _heartbeat(self) -> None:
         hb_interval = 30
         last_log = time.time()
-        while not self._stop.is_set():
+        while not self._should_stop():
             now = time.time()
             if now - last_log >= hb_interval:
                 size_mb = (
@@ -172,7 +189,7 @@ class ShardWorker:
             tuned = False
             arrow_native = hasattr(cursor, "fetchmany_arrow")
 
-            while not self._stop.is_set():
+            while not self._should_stop():
                 tbl = self._fetch_one_batch(cursor, chunk_rows, arrow_native)
                 if tbl is None or tbl.num_rows == 0:
                     break
@@ -186,7 +203,7 @@ class ShardWorker:
                 try:
                     self._queue.put(tbl, timeout=2)
                 except queue.Full:
-                    if self._stop.is_set():
+                    if self._should_stop():
                         break
                     chunk_rows = max(1000, int(chunk_rows * 0.7))
                     continue
@@ -206,7 +223,7 @@ class ShardWorker:
                 try:
                     tbl = self._queue.get(timeout=5)
                 except queue.Empty:
-                    if self._stop.is_set():
+                    if self._should_stop():
                         break
                     continue
 
