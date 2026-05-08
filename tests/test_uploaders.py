@@ -24,7 +24,7 @@ class _SomeAwsHook:
 def test_registry_contains_known_backends():
     backends = get_registry()
     names = {b.name for b in backends}
-    assert names == {"azure", "s3"}
+    assert names == {"azure", "s3", "gcs"}
 
 
 def test_uploaders_satisfy_protocol():

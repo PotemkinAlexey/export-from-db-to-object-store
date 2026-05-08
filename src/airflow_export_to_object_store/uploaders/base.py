@@ -51,9 +51,10 @@ def get_registry() -> List[Uploader]:
     """Return all built-in uploaders. Order = priority."""
     # Imported lazily so that missing optional providers don't fail module load.
     from .azure import AzureBlobUploader
+    from .gcs import GCSUploader
     from .s3 import S3Uploader
 
-    return [AzureBlobUploader(), S3Uploader()]
+    return [AzureBlobUploader(), S3Uploader(), GCSUploader()]
 
 
 def resolve_uploader(storage_hook: Any, registry: Optional[Sequence[Uploader]] = None) -> Uploader:

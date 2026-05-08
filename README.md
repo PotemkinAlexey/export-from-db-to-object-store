@@ -6,7 +6,8 @@
 
 Universal streaming Airflow operator: execute SQL on **any** PEP-249 / Airflow-hooked database,
 stream results as Apache Arrow batches, write them to **Parquet**, and upload to
-**Azure Blob Storage** or **AWS S3** — with sharding, retries, auto-tuned chunks and rich metrics.
+**Azure Blob Storage**, **AWS S3** or **Google Cloud Storage** — with sharding,
+retries, auto-tuned chunks and rich metrics.
 
 Designed for high-volume exports with a **minimal memory footprint**.
 
@@ -19,7 +20,7 @@ Designed for high-volume exports with a **minimal memory footprint**.
 - **Parquet writer** — configurable compression (zstd by default), row group size, timestamp coercion.
 - **Sharding** — parallel shard execution via `ThreadPoolExecutor`.
 - **Retry logic** — unified `@with_retries` with exponential backoff.
-- **Object storage** — Azure Blob (simple + block-list for >5 GB) and AWS S3 (boto3 multipart).
+- **Object storage** — Azure Blob (simple + block-list for >5 GB), AWS S3 (boto3 multipart), Google Cloud Storage (resumable multipart via `GCSHook.upload`).
 - **Health checks** — network, memory, disk, container/bucket connectivity.
 - **Per-shard metrics** — pushed to XCom, plus a colourful ASCII summary in logs.
 - **Jinja templates** — full Airflow macros support (`{{ ds }}`, etc.) in SQL and remote paths.
@@ -36,6 +37,7 @@ With backend extras:
 ```bash
 pip install "airflow-export-to-object-store[azure]"        # Azure Blob
 pip install "airflow-export-to-object-store[s3]"           # AWS S3
+pip install "airflow-export-to-object-store[gcs]"          # Google Cloud Storage
 pip install "airflow-export-to-object-store[snowflake]"    # Snowflake driver
 pip install "airflow-export-to-object-store[postgres]"     # psycopg2
 pip install "airflow-export-to-object-store[databricks]"   # Databricks SQL

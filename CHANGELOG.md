@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-05-08
+
+### Added
+- Google Cloud Storage backend (`uploaders/gcs.py`, `gcs` extra). The
+  `GCSUploader` plugs into the existing registry: any `GCSHook` instance
+  is auto-detected and uploads via the hook's resumable-upload path.
+  Health check tries write/delete, then falls back to a `get_bucket` read.
+- Tests covering registry resolution, upload arguments, both health-check
+  paths, and the bucket-required error.
+
+### Changed
+- CI now installs `[dev,s3,gcs]` so the GCS provider is available during tests.
+
 ## [0.2.0] - 2026-05-08
 
 ### Added

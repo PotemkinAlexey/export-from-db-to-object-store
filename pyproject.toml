@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "airflow-export-to-object-store"
-version = "0.2.0"
+version = "0.3.0"
 description = "Universal streaming Airflow operator: SQL DB → Arrow → Parquet → Azure Blob / AWS S3."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -53,6 +53,10 @@ azure = [
 s3 = [
     "apache-airflow-providers-amazon>=8.0",
     "boto3>=1.26",
+]
+gcs = [
+    "apache-airflow-providers-google>=10.0",
+    "google-cloud-storage>=2.10",
 ]
 postgres = ["psycopg2-binary>=2.9"]
 snowflake = ["snowflake-connector-python>=3.0"]
