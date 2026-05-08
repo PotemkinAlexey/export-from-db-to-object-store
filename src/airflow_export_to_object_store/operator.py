@@ -14,6 +14,7 @@ import shutil
 import tempfile
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from typing import Any, Dict, List, Optional
@@ -96,21 +97,6 @@ class StreamingExportOperator(BaseOperator):
 
         super().__init__(task_id=task_id, **kwargs)
         self.tmp_dir = tmp_dir
-        # Auto-clean old tmp dirs
-        if self.tmp_dir and os.path.exists(self.tmp_dir):
-            try:
-                now = time.time()
-                for item in os.listdir(self.tmp_dir):
-                    item_path = os.path.join(self.tmp_dir, item)
-
-                    # only remove directories created by this operator
-                    if os.path.isdir(item_path):
-                        age = now - os.path.getmtime(item_path)
-                        if age > 24 * 3600:
-                            shutil.rmtree(item_path, ignore_errors=True)
-                            self.log.info(f"🧹 Cleaned old temp directory: {item}")
-            except Exception as e:
-                self.log.warning(f"Temp cleanup failed: {e}")
 
         # Basic validation
         if bool(query) == bool(sql_template):
@@ -152,6 +138,8 @@ class StreamingExportOperator(BaseOperator):
             • Collect metrics into final summary"""
         t0 = time.time()
 
+        self._clean_old_tmp_dirs()
+
         # Pre-flight checks
         self._health_checks(context)
 
@@ -168,9 +156,6 @@ class StreamingExportOperator(BaseOperator):
             remote_path = self._render_template_str(self.remote_path_template, shard_ctx)
 
             tasks.append((idx, sql_text, filename, remote_path))
-
-        results: List[ShardResult] = []
-        futures = {}
 
         from concurrent.futures import FIRST_EXCEPTION, wait
 
@@ -208,8 +193,15 @@ class StreamingExportOperator(BaseOperator):
 
     @staticmethod
     def flatten_and_render_params(data: dict, ctx: dict) -> dict:
-        """Flatten nested dict/list and render Jinja templates."""
-        flat = {}
+        """Flatten nested dict/list and render Jinja templates.
+
+        Top-level input must be a dict; scalars at the very top would collide
+        on a single synthetic key, so we reject them explicitly.
+        """
+        if not isinstance(data, dict):
+            raise TypeError(f"flatten_and_render_params expects a dict, got {type(data).__name__}")
+
+        flat: Dict[str, Any] = {}
 
         def _flatten(prefix: str, value: Any, depth=0):
             if depth > 10:
@@ -224,8 +216,11 @@ class StreamingExportOperator(BaseOperator):
                     key = f"{prefix}_{i}" if prefix else f"list_{i}"
                     _flatten(key, v, depth + 1)
             else:
-                flat_key = prefix if prefix else "root"
-                flat[flat_key] = value
+                if not prefix:
+                    raise ValueError("Unexpected scalar at top level during flattening")
+                if prefix in flat:
+                    raise ValueError(f"Duplicate flattened key: {prefix!r}")
+                flat[prefix] = value
 
         _flatten("", data)
 
@@ -292,7 +287,7 @@ class StreamingExportOperator(BaseOperator):
 
             def heartbeat():
                 hb_interval = 30
-                last_log = 0
+                last_log = time.time()
                 while not stop_event.is_set():
                     now = time.time()
                     if now - last_log >= hb_interval:
@@ -786,6 +781,22 @@ class StreamingExportOperator(BaseOperator):
         except Exception as e:
             self.log.warning(f"Memory check failed: {e}")
 
+    def _clean_old_tmp_dirs(self) -> None:
+        """Remove this operator's leftover tmp dirs older than 24h. Runs once per execute()."""
+        if not self.tmp_dir or not os.path.exists(self.tmp_dir):
+            return
+        try:
+            now = time.time()
+            for item in os.listdir(self.tmp_dir):
+                item_path = os.path.join(self.tmp_dir, item)
+                if os.path.isdir(item_path):
+                    age = now - os.path.getmtime(item_path)
+                    if age > 24 * 3600:
+                        shutil.rmtree(item_path, ignore_errors=True)
+                        self.log.info("🧹 Cleaned old temp directory: %s", item)
+        except Exception as e:
+            self.log.warning("Temp cleanup failed: %s", e)
+
     def _health_checks(self, context):
         """
         Validate storage connection, bucket/container accessibility,
@@ -810,7 +821,7 @@ class StreamingExportOperator(BaseOperator):
                 container_client = client.get_container_client(self.container)
 
                 try:
-                    test_blob = container_client.get_blob_client("_healthcheck_tmp")
+                    test_blob = container_client.get_blob_client(f"_healthcheck_tmp_{uuid.uuid4().hex}")
 
                     # 1) Try WRITE permission
                     try:
@@ -894,20 +905,13 @@ class StreamingExportOperator(BaseOperator):
         full_ctx = {**ctx, "macros": macros, **flat_params}
         rendered = Template(template_str, undefined=StrictUndefined).render(**full_ctx)
 
-        # --------------------------------------
-        # Basic SQL safety validation
-        # --------------------------------------
         if label == "SQL":
-            check = rendered.upper()
+            stripped = rendered.lstrip().upper()
+            if not stripped.startswith(("SELECT", "WITH")):
+                self.log.warning("SQL does not start with SELECT/WITH (first 100 chars): %s", stripped[:100])
 
-            dangerous = ["; DROP", "UNION SELECT", "--", "/*", "XP_CMDSHELL"]
-            if any(x in check for x in dangerous):
-                self.log.warning("⚠ Potential SQL injection: %s", rendered[:200])
-
-            if not check.strip().startswith(("SELECT", "WITH")):
-                self.log.warning("SQL does not start with SELECT/WITH: %s", check[:100])
-
-        self.log.info("Rendered %s:\n%s", label, rendered)
+        # SQL bodies may contain sensitive parameters — keep at DEBUG, not INFO.
+        self.log.debug("Rendered %s:\n%s", label, rendered)
         return rendered
 
     def _render_template_str(self, template_str: str, ctx: Dict[str, Any]) -> str:

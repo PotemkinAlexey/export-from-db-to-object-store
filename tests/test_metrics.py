@@ -28,3 +28,13 @@ def test_summary_with_recorded_shards():
 def test_summary_without_start_returns_empty():
     m = ExportMetrics(_FakeOperator())
     assert m.summary() == {}
+
+
+def test_summary_with_no_shards_does_not_crash():
+    """Regression: summary() used to crash on empty shards (max() on empty seq)."""
+    m = ExportMetrics(_FakeOperator())
+    m.start()
+    s = m.summary()
+    assert s["total_rows"] == 0
+    assert s["total_bytes"] == 0
+    assert s["shards"] == []

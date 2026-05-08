@@ -56,6 +56,10 @@ class ExportMetrics:
             "shards": self.shards,
         }
 
+        if not self.shards:
+            self.operator.log.info("Export completed with no shards recorded.")
+            return summary
+
         # ============================================================
         # SUPER-GRAFANA METRICS BLOCK (ASCII ART + ANALYTICS)
         # ============================================================
