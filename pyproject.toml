@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "airflow-export-to-object-store"
-version = "0.1.0"
+version = "0.2.0"
 description = "Universal streaming Airflow operator: SQL DB → Arrow → Parquet → Azure Blob / AWS S3."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -75,6 +75,9 @@ Issues = "https://github.com/PotemkinAlexey/export-from-db-to-object-store/issue
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/airflow_export_to_object_store"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/airflow_export_to_object_store/py.typed" = "airflow_export_to_object_store/py.typed"
 
 [tool.hatch.build.targets.sdist]
 include = [

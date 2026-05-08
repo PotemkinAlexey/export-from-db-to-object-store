@@ -68,9 +68,9 @@ class StreamingExportOperator(BaseOperator):
         remote_path_template: str = "{{ ds }}/data_{{ '%03d' | format(shard_index) }}.parquet",
         container: Optional[str] = None,
         bucket: Optional[str] = None,
-        parquet_options: ParquetOptions = ParquetOptions(),
-        retry_options: RetryOptions = RetryOptions(),
-        shard_options: ShardOptions = ShardOptions(),
+        parquet_options: Optional[ParquetOptions] = None,
+        retry_options: Optional[RetryOptions] = None,
+        shard_options: Optional[ShardOptions] = None,
         tmp_dir: Optional[str] = None,
         compute_md5: bool = False,
         overwrite: bool = True,
@@ -98,9 +98,9 @@ class StreamingExportOperator(BaseOperator):
         self.container = container
         self.bucket = bucket
 
-        self.parquet_options = parquet_options
-        self.retry_options = retry_options
-        self.shard_options = shard_options
+        self.parquet_options = parquet_options or ParquetOptions()
+        self.retry_options = retry_options or RetryOptions()
+        self.shard_options = shard_options or ShardOptions()
         self.compute_md5 = compute_md5
         self.overwrite = overwrite
         self.log_timings = log_timings
