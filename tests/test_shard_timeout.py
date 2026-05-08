@@ -1,4 +1,19 @@
-"""Per-shard timeout: a slow cursor must not run forever."""
+"""Per-shard timeout: a slow cursor must not run forever.
+
+Real DB drivers either honour socket-level timeouts and return errors
+when the deadline hits, or yield rows in small batches between which
+the fetch loop polls the stop event. Either way the watchdog catches
+them within ``timeout`` seconds of firing. The test models the
+batched-yield case (the more common one) — between batches the fetch
+loop calls :meth:`ShardWorker._should_stop`, sees the timer-set stop
+event, exits, and ``run()`` raises ``TimeoutError``.
+
+If a driver is genuinely stuck inside a single uninterruptible C call
+(``time.sleep(60)`` from Python, or a poorly-written native code that
+ignores signals), neither this watchdog nor any thread-based scheme
+can preempt it — the user's escape hatch is Airflow's own
+``execution_timeout`` which kills the task process.
+"""
 
 from __future__ import annotations
 
@@ -19,23 +34,31 @@ class _FakeOp:
     log = LOG
 
 
-class _StuckCursor:
-    """A cursor whose fetchmany blocks much longer than the test timeout."""
+class _SlowCursor:
+    """Yields one row every 50 ms forever (until the loop is told to stop).
+
+    Models a DB that's actively producing data but slowly, so the fetch
+    loop polls ``_should_stop`` between batches.
+    """
 
     description = [("id", None, None, None, None, None, None)]
+
+    def __init__(self):
+        self.calls = 0
 
     def execute(self, _sql):
         return None
 
     def fetchmany(self, _n):
-        time.sleep(60)
-        return []
+        time.sleep(0.05)
+        self.calls += 1
+        return [(self.calls,)]
 
     def close(self):
         pass
 
 
-class _StuckAdapter:
+class _SlowAdapter:
     def __init__(self, cursor):
         self._cursor = cursor
 
@@ -50,6 +73,7 @@ def test_timeout_aborts_stuck_shard(tmp_path):
     metrics = ExportMetrics(_FakeOp())
     metrics.start()
 
+    cursor = _SlowCursor()
     worker = ShardWorker(
         shard_index=0,
         sql_text="SELECT 1",
@@ -65,14 +89,18 @@ def test_timeout_aborts_stuck_shard(tmp_path):
         upload_fn=lambda *_a: "fake://x",
         metrics=metrics,
         log=LOG,
-        db_adapter_factory=lambda _id: _StuckAdapter(_StuckCursor()),
+        db_adapter_factory=lambda _id: _SlowAdapter(cursor),
     )
 
     started = time.time()
     with pytest.raises(TimeoutError, match="timeout"):
         worker.run()
-    # ShardWorker's timer fires at 0.5s; threads notice on next stop poll.
-    assert time.time() - started < 5.0
+    elapsed = time.time() - started
+    # Timer at 0.5 s + one batch (50 ms) + thread join overhead.
+    assert elapsed < 5.0, f"shard took {elapsed:.2f}s to honour timeout"
+    # We must have spent at least the timeout — otherwise the test wasn't
+    # really exercising the watchdog path.
+    assert elapsed >= 0.5
 
 
 def test_no_timeout_leaves_normal_shard_alone(tmp_path):
