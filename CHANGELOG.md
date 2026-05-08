@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-05-08
+
+First stable release.
+
+### Added
+- `CONTRIBUTING.md` covering local setup, project shape, what we
+  welcome / push back on, PR checklist, release process.
+- Six runnable example DAGs under `examples/` covering the basic
+  shape, sharded streaming, incremental + idempotent re-runs, native
+  Snowflake unload, PII transforms, and Hive-style partitioning.
+
+### Changed
+- `README.md` reorganised: explicit table of contents, a "Why this
+  operator" comparison up front, separate sections for core concepts /
+  production patterns / observability / extensibility / configuration
+  reference / examples / development. No new features; lots of
+  redundancy removed.
+- `StreamingExportOperator` class docstring rewritten to reflect the
+  full v1 surface (modes, parameters, idempotency, manifest, unload,
+  incremental, transform_fn).
+
+Stable promise from this point: any change that breaks a public API
+ships in a major version bump (2.0+) with a migration note. The
+`Uploader` and `UnloadStrategy` Protocols are stable extension points;
+new optional methods may be added but existing methods will not change
+shape without a major bump.
+
 ## [0.9.0] - 2026-05-08
 
 ### Added

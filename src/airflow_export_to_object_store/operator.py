@@ -36,27 +36,71 @@ from .utils import coerce_ts_table, compute_md5_eff
 
 
 class StreamingExportOperator(BaseOperator):
+    """High-throughput streaming export from any SQL database to Parquet,
+    uploaded to AWS S3, Azure Blob Storage, or Google Cloud Storage.
+
+    Two modes of operation, picked by what you pass:
+
+    * **Streaming** (default): the operator streams Arrow batches from
+      the DB cursor, writes them to a local Parquet file, and uploads
+      to the bucket. Sharded across a thread or process pool.
+    * **Native unload**: pass an :class:`UnloadStrategy` (e.g.
+      :class:`SnowflakeUnloadStrategy`) to delegate the export to the
+      warehouse itself — typically 10–50× faster for terabyte-scale
+      jobs.
+
+    Both modes share the same idempotency, manifest, watermark, retry,
+    and tracing surface. See the README for end-to-end examples.
+
+    Parameters
+    ----------
+    db_hook_id, storage_hook_id
+        Airflow connection IDs for the source DB and the destination
+        bucket / container.
+    query, sql_template
+        Either a literal SQL string or a Jinja template (exactly one).
+        ``shards`` items, ``sql_params``, ``watermark_prev`` /
+        ``watermark_now`` (when ``incremental`` is set), and the
+        Airflow task context all flow into the template.
+    shards
+        List of dicts that vary per shard. Each shard runs in parallel
+        and gets ``shard_index`` (0..N-1) injected automatically.
+        Default: a single empty dict (one shard).
+    filename_template, remote_path_template
+        Local Parquet filename and cloud object key, both Jinja
+        templates rendered with the same context as the SQL.
+    container, bucket
+        Azure container / S3+GCS bucket. Required for the matching
+        backend; the other is ignored.
+    parquet_options, retry_options, shard_options
+        See :class:`ParquetOptions`, :class:`RetryOptions`,
+        :class:`ShardOptions` for full field listings.
+    skip_if_exists
+        Probe the destination via the backend's ``exists()`` API
+        before opening any DB cursor; if the object is already there
+        the shard returns immediately with ``ShardResult.skipped=True``.
+    write_manifest, manifest_path
+        Emit ``_manifest.json`` next to the data (or at
+        ``manifest_path`` if explicit) listing every file with rows,
+        bytes, MD5, and totals. Atomic catalog for downstream
+        Athena / Trino / Spark.
+    unload_strategy, unload_dir_template
+        Switch to native warehouse unload mode.
+    incremental
+        :class:`IncrementalConfig` for watermark-driven exports. The
+        operator reads the previous watermark from XCom, computes a
+        fresh one, exposes both as ``{{ watermark_prev }}`` /
+        ``{{ watermark_now }}`` in templates, and pushes the new value
+        back to XCom on success.
+    transform_fn
+        Optional ``Callable[[pa.Table], pa.Table]`` applied to every
+        Arrow batch before write — for PII masking, derived columns,
+        type coercion. Must be a top-level callable when running with
+        ``execution_mode='processes'``.
+    compute_md5, overwrite, validate_parquet
+        Per-shard checksum, replace-existing, and pre-upload Parquet
+        sanity checks.
     """
-    High-throughput streaming export from any SQL database to Parquet, uploaded to Azure Blob or AWS S3.
-
-    Features:
-        • Arrow-native or DB-API fallback fetching
-        • Memory-safe incremental Parquet writing
-        • Automatic batch tuning per shard
-        • Parallel shards using ThreadPoolExecutor
-        • Azure (Wasb) and S3 (multipart) uploads with retries
-        • Per-shard metrics and full summary returned via XCom
-
-    Parameters:
-        db_hook_id: Airflow connection to SQL source.
-        storage_hook_id: Airflow connection to Azure/S3.
-        query/sql_template: SQL text or Jinja template.
-        shards: List of shard dicts used in SQL templating.
-        filename_template: Local Parquet filename pattern.
-        remote_path_template: Cloud path pattern.
-        parquet_options: Parquet compression/row groups/etc.
-        retry_options: Retry/backoff settings for uploads.
-        shard_options: Parallelism, chunk size, timeouts."""
 
     def __init__(
         self,
