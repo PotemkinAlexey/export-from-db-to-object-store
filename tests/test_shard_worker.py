@@ -39,7 +39,9 @@ class _SqliteAdapter:
 
 
 def _make_factory(rows):
-    conn = sqlite3.connect(":memory:")
+    # ShardWorker drives the cursor from a fetch thread, so we must allow
+    # cross-thread use of the sqlite connection.
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.execute("CREATE TABLE t (id INTEGER, name TEXT)")
     conn.executemany("INSERT INTO t VALUES (?, ?)", rows)
     conn.commit()
