@@ -6,7 +6,6 @@ Execute SQL via any DB hook (PEP-249 / Airflow Connection) → stream Arrow batc
 """
 from __future__ import annotations
 
-import hashlib
 import mimetypes
 import os
 import queue
@@ -21,15 +20,20 @@ from typing import Any, Dict, List, Optional
 
 import pyarrow as pa
 import pyarrow.parquet as pq
-from airflow import macros
 from airflow.hooks.base import BaseHook
 from airflow.models import BaseOperator
-from jinja2 import StrictUndefined, Template
 
 from .db_adapter import UniversalDbAdapter
 from .metrics import ExportMetrics
 from .options import ParquetOptions, RetryOptions, ShardOptions, ShardResult
+from .parquet_validator import validate_parquet_schema
 from .retry import with_retries
+from .templating import (
+    flatten_and_render_params as _flatten_and_render_params,
+    render_path_template,
+    render_template,
+)
+from .utils import coerce_ts_table, compute_md5_eff
 
 try:
     from airflow.providers.microsoft.azure.hooks.wasb import WasbHook
@@ -193,44 +197,8 @@ class StreamingExportOperator(BaseOperator):
 
     @staticmethod
     def flatten_and_render_params(data: dict, ctx: dict) -> dict:
-        """Flatten nested dict/list and render Jinja templates.
-
-        Top-level input must be a dict; scalars at the very top would collide
-        on a single synthetic key, so we reject them explicitly.
-        """
-        if not isinstance(data, dict):
-            raise TypeError(f"flatten_and_render_params expects a dict, got {type(data).__name__}")
-
-        flat: Dict[str, Any] = {}
-
-        def _flatten(prefix: str, value: Any, depth=0):
-            if depth > 10:
-                raise ValueError("Params nesting too deep — recursion loop?")
-
-            if isinstance(value, dict):
-                for k, v in value.items():
-                    key = f"{prefix}_{k}" if prefix else k
-                    _flatten(key, v, depth + 1)
-            elif isinstance(value, list):
-                for i, v in enumerate(value):
-                    key = f"{prefix}_{i}" if prefix else f"list_{i}"
-                    _flatten(key, v, depth + 1)
-            else:
-                if not prefix:
-                    raise ValueError("Unexpected scalar at top level during flattening")
-                if prefix in flat:
-                    raise ValueError(f"Duplicate flattened key: {prefix!r}")
-                flat[prefix] = value
-
-        _flatten("", data)
-
-        result = {}
-        for k, v in flat.items():
-            if isinstance(v, str) and "{{" in v and "}}" in v:
-                result[k] = Template(v, undefined=StrictUndefined).render(**ctx)
-            else:
-                result[k] = v
-        return result
+        """Backwards-compatible delegate; see :mod:`templating`."""
+        return _flatten_and_render_params(data, ctx)
 
     # ------------------------------------------------------------------
     # Run a single shard
@@ -884,196 +852,23 @@ class StreamingExportOperator(BaseOperator):
         self.log.info("Health checks OK ✓")
 
     # ------------------------------------------------------------------
-    # TEMPLATE RENDERING (SQL + paths)
+    # TEMPLATE RENDERING (delegates to templating module)
     # ------------------------------------------------------------------
-    def _render_template(self, template_str: str, ctx: Dict[str, Any], label="template") -> str:
-        """
-        Render Jinja template with Airflow macros, SQL params,
-        and flattened dynamic parameters.
-        Also performs SQL-injection safety checks.
-        """
-        flat_params = self.flatten_and_render_params(
-            {
-                **ctx.get("params", {}),
-                **self.sql_params,
-                **ctx,
-                "macros": macros,
-            },
-            ctx,
-        )
-
-        full_ctx = {**ctx, "macros": macros, **flat_params}
-        rendered = Template(template_str, undefined=StrictUndefined).render(**full_ctx)
-
-        if label == "SQL":
-            stripped = rendered.lstrip().upper()
-            if not stripped.startswith(("SELECT", "WITH")):
-                self.log.warning("SQL does not start with SELECT/WITH (first 100 chars): %s", stripped[:100])
-
-        # SQL bodies may contain sensitive parameters — keep at DEBUG, not INFO.
-        self.log.debug("Rendered %s:\n%s", label, rendered)
-        return rendered
+    def _render_template(self, template_str: str, ctx: Dict[str, Any], label: str = "template") -> str:
+        return render_template(template_str, ctx, self.sql_params, self.log, label=label)
 
     def _render_template_str(self, template_str: str, ctx: Dict[str, Any]) -> str:
-        """
-        Render template for filenames / remote paths.
-        Includes path traversal protections.
-        """
-        rendered = self._render_template(template_str, ctx, label="string")
-
-        # Prevent path traversal
-        if ".." in rendered or rendered.startswith("/"):
-            raise ValueError(f"Invalid path: {rendered}")
-
-        return rendered.lstrip("/")
+        return render_path_template(template_str, ctx, self.sql_params, self.log)
 
     # ------------------------------------------------------------------
-    # TIMESTAMP COERCION
+    # Backwards-compatible delegates to extracted modules.
     # ------------------------------------------------------------------
     def _coerce_ts_table(self, tbl: pa.Table, target_unit: str) -> pa.Table:
-        """
-        Convert all timestamp columns in the table to target unit (ms/us/ns).
-        Avoids schema drift in ParquetWriter.
-        """
-        if target_unit not in ("s", "ms", "us", "ns"):
-            return tbl
-
-        new_fields = []
-        for field in tbl.schema:
-            if pa.types.is_timestamp(field.type):
-                new_fields.append(pa.field(field.name, pa.timestamp(target_unit, field.type.tz)))
-            else:
-                new_fields.append(field)
-
-        new_schema = pa.schema(new_fields)
-        return tbl.cast(new_schema, safe=False)
+        return coerce_ts_table(tbl, target_unit)
 
     @staticmethod
     def compute_md5_eff(file_path: str, *, log_fn=None, skip_threshold_gb: int = 10):
-        """
-        Efficient MD5 calculation with optional logging and skip for huge files.
-        Returns MD5 hex string or None.
-        """
-        size = os.path.getsize(file_path)
-        size_gb = size / (1024**3)
-
-        # Auto-skip huge files
-        if size_gb > skip_threshold_gb:
-            if log_fn:
-                log_fn(f"Skipping MD5 for very large file (size: {size_gb:.1f} GB)")
-            return None
-
-        h = hashlib.md5()
-        buf = bytearray(8 * 1024 * 1024)  # 8MB
-        mv = memoryview(buf)
-
-        with open(file_path, "rb", buffering=0) as f:
-            while True:
-                n = f.readinto(buf)
-                if not n:
-                    break
-                h.update(mv[:n])
-
-        return h.hexdigest()
+        return compute_md5_eff(file_path, log_fn=log_fn, skip_threshold_gb=skip_threshold_gb)
 
     def _validate_parquet_schema(self, file_path: str) -> bool:
-        """
-        Lightweight but powerful Parquet validation:
-        • checks that the file is readable
-        • schema is valid
-        • no corrupt footer
-        • row groups > 0
-        • warns about nested/logical types
-        • performs minimal sample read
-        """
-        try:
-            if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
-                self.log.error(f"❌ Parquet file is empty or missing: {file_path}")
-                return False
-
-            # -------------------------------------------------------
-            # FOOTER + METADATA VALIDATION
-            # -------------------------------------------------------
-            try:
-                meta = pq.read_metadata(file_path)
-            except Exception as e:
-                self.log.error(f"❌ Failed to read Parquet metadata/footer: {e}")
-                return False
-
-            if meta.num_row_groups == 0:
-                self.log.error("❌ Parquet file has zero row groups — likely corrupt.")
-                return False
-
-            # -------------------------------------------------------
-            # SCHEMA VALIDATION
-            # -------------------------------------------------------
-            try:
-                schema = pq.read_schema(file_path)
-            except Exception as e:
-                self.log.error(f"❌ Failed to read Parquet schema: {e}")
-                return False
-
-            for field in schema:
-                t = field.type
-
-                # Warn on nested types
-                if pa.types.is_nested(t):
-                    self.log.warning(f"⚠️ Nested type: {field.name} → {t}")
-
-                # Warn on Maps
-                if pa.types.is_map(t):
-                    self.log.warning(f"⚠️ MAP type detected — may not be supported by some engines: {field.name}")
-
-                # Warn on LargeList / LargeBinary
-                if pa.types.is_large_list(t) or pa.types.is_large_binary(t):
-                    self.log.warning(f"⚠️ Large* Parquet types detected: {field.name} → {t}")
-
-                # Warn on DECIMAL with high precision
-                if pa.types.is_decimal(t) and t.precision > 38:
-                    self.log.warning(f"⚠️ High precision DECIMAL({t.precision},{t.scale}) might break consumers")
-
-                # Timestamp consistency check
-                if pa.types.is_timestamp(t) and t.unit not in ("ms", "us", "ns"):
-                    self.log.warning(f"⚠️ Unexpected timestamp unit {t.unit} for column {field.name}")
-
-            # -------------------------------------------------------
-            # SAMPLE READ VALIDATION (read small slices of all columns)
-            # -------------------------------------------------------
-            try:
-                # We read the *first row group only*, not entire file.
-                # This guarantees a light read but still validates schema & encodings.
-                pf = pq.ParquetFile(file_path)
-
-                if pf.num_row_groups == 0:
-                    self.log.error("❌ Parquet has zero row groups.")
-                    return False
-
-                # Read first row group (usually up to ~128–512MB uncompressed)
-                row_group = pf.read_row_group(0, use_threads=False)
-
-                # Now take a small sample from the row group
-                sample = row_group.slice(0, min(1000, row_group.num_rows))
-                _ = sample.num_rows  # force materialization
-
-                self.log.info(f"Sample read OK ✓ (rows={sample.num_rows}, columns={len(sample.schema.names)})")
-
-            except Exception as e:
-                self.log.error(f"❌ Failed to read sample data (all columns): {e}")
-                return False
-
-            if row_group.num_rows == 0:
-                self.log.warning("⚠️ First row group has zero rows.")
-
-            # SUCCESS LOG
-            self.log.info(
-                f"✅ Parquet validation succeeded: "
-                f"sample_rows={sample.num_rows}, "
-                f"columns={len(schema)}, "
-                f"row_groups={meta.num_row_groups}"
-            )
-
-            return True
-
-        except Exception as e:
-            self.log.error(f"❌ Unexpected Parquet validation error: {e}")
-            return False
+        return validate_parquet_schema(file_path, self.log)

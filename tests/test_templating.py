@@ -1,11 +1,9 @@
-"""Tests for flatten_and_render_params (static method, no Airflow context needed)."""
+"""Tests for flatten_and_render_params from the templating module."""
 from __future__ import annotations
 
 import pytest
 
-from airflow_export_to_object_store.operator import StreamingExportOperator
-
-flatten = StreamingExportOperator.flatten_and_render_params
+from airflow_export_to_object_store.templating import flatten_and_render_params as flatten
 
 
 def test_flat_dict_passthrough():
