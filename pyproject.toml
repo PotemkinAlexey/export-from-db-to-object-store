@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "airflow-export-to-object-store"
-version = "1.1.0"
+version = "1.2.0"
 description = "Universal streaming Airflow operator: SQL DB → Arrow → Parquet → Azure Blob / AWS S3."
 readme = "README.md"
 license = { text = "Apache-2.0" }

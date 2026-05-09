@@ -23,6 +23,7 @@ from typing import Any
 
 from airflow.hooks.base import BaseHook
 
+from .encryption import EncryptionOptions
 from .metrics import ExportMetrics
 from .options import ParquetOptions, RetryOptions, ShardOptions, ShardResult
 from .parquet_io import ShardWorker, TransformFn
@@ -64,6 +65,8 @@ class ShardTaskParams:
     # MUST be a top-level callable (importable by name) when running with
     # ``execution_mode='processes'`` — closures and lambdas cannot be pickled.
     transform_fn: TransformFn | None = None
+    encryption: EncryptionOptions | None = None
+    tags: dict[str, str] | None = None
 
 
 class _UploadHost:
@@ -86,6 +89,8 @@ class _UploadHost:
         bucket: str | None,
         overwrite: bool,
         storage_hook_id: str,
+        encryption: EncryptionOptions | None = None,
+        tags: dict[str, str] | None = None,
     ) -> str:
         uploader = resolve_uploader(storage_hook)
         return uploader.upload(
@@ -97,6 +102,8 @@ class _UploadHost:
             overwrite=overwrite,
             storage_hook_id=storage_hook_id,
             log=self.log,
+            encryption=encryption,
+            tags=tags,
         )
 
 
@@ -165,6 +172,8 @@ def execute_shard(params: ShardTaskParams, cancel: threading.Event | None = None
             bucket=params.bucket,
             overwrite=params.overwrite,
             storage_hook_id=params.storage_hook_id,
+            encryption=params.encryption,
+            tags=params.tags,
         )
 
     # A throwaway metrics object scoped to this shard. The parent operator

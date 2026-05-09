@@ -1,0 +1,42 @@
+name: Feature request
+description: A new operator option, backend, or unload strategy.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you solving?
+      description: |
+        The concrete production scenario you'd hit today. New options
+        are easier to evaluate when we know what they unblock.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed shape
+      description: |
+        What you'd like the API to look like. Doesn't have to be final;
+        a sketch is fine.
+      render: python
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried, and why they didn't fit.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Rough scope
+      options:
+        - New operator option
+        - New uploader backend
+        - New unload strategy (warehouse → bucket)
+        - New DB driver path
+        - Documentation / examples
+        - Other
+    validations:
+      required: true

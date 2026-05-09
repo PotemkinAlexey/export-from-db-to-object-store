@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 from .db_adapter import UniversalDbAdapter
+from .encryption import EncryptionOptions
 from .incremental import IncrementalConfig
 from .metrics import ExportMetrics
 from .operator import StreamingExportOperator
 from .options import ParquetOptions, RetryOptions, ShardOptions, ShardResult
 from .retry import with_retries
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 __all__ = [
     "StreamingExportOperator",
     "UniversalDbAdapter",
+    "EncryptionOptions",
     "ExportMetrics",
     "IncrementalConfig",
     "ParquetOptions",

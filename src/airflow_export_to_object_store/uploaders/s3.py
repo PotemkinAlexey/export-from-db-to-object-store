@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
+from urllib.parse import quote
 
 from airflow.hooks.base import BaseHook
+
+from ..encryption import EncryptionOptions
 
 try:
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
@@ -101,6 +104,8 @@ class S3Uploader:
         overwrite: bool,
         storage_hook_id: str,
         log: logging.Logger,
+        encryption: EncryptionOptions | None = None,
+        tags: Mapping[str, str] | None = None,
     ) -> str:
         import boto3
         from boto3.s3.transfer import TransferConfig
@@ -136,5 +141,32 @@ class S3Uploader:
             max_concurrency=8,
             use_threads=True,
         )
-        s3.upload_file(Filename=local_path, Bucket=resolved, Key=remote_path, Config=transfer_cfg)
+        extra_args = _build_extra_args(encryption=encryption, tags=tags)
+        s3.upload_file(
+            Filename=local_path,
+            Bucket=resolved,
+            Key=remote_path,
+            Config=transfer_cfg,
+            ExtraArgs=extra_args or None,
+        )
         return f"s3://{resolved}/{remote_path}"
+
+
+def _build_extra_args(*, encryption: EncryptionOptions | None, tags: Mapping[str, str] | None) -> dict[str, Any]:
+    """Translate generic encryption + tags options into S3 ``ExtraArgs``.
+
+    SSE-S3 (``"AES256"``) needs no key id; SSE-KMS (``"aws:kms"``)
+    requires ``kms_key_id``. Object tags are URL-encoded as the
+    ``"k1=v1&k2=v2"`` shape AWS expects.
+    """
+    extra: dict[str, Any] = {}
+    if encryption is not None:
+        if encryption.sse_algorithm:
+            extra["ServerSideEncryption"] = encryption.sse_algorithm
+        if encryption.kms_key_id:
+            extra["SSEKMSKeyId"] = encryption.kms_key_id
+            # SSE-KMS implies "aws:kms" if caller didn't set the algorithm.
+            extra.setdefault("ServerSideEncryption", "aws:kms")
+    if tags:
+        extra["Tagging"] = "&".join(f"{quote(str(k), safe='')}={quote(str(v), safe='')}" for k, v in tags.items())
+    return extra

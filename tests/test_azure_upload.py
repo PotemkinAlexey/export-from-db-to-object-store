@@ -32,7 +32,7 @@ def test_simple_upload_calls_blob_client(tmp_path):
     local.write_bytes(payload)
     hook, service, blob = _make_hook()
 
-    uri = AzureBlobUploader._simple(hook, str(local), "exports/data.parquet", "my-container", True, LOG)
+    uri = AzureBlobUploader._simple(hook, str(local), "exports/data.parquet", "my-container", True, LOG, None, None)
 
     assert uri == "azure://my-container/exports/data.parquet"
     service.get_blob_client.assert_called_once_with(container="my-container", blob="exports/data.parquet")
@@ -49,7 +49,7 @@ def test_block_upload_splits_file_and_commits(tmp_path, monkeypatch):
     local.write_bytes(b"abcdefghij")  # 10 bytes -> 3 blocks of 4/4/2
     hook, service, blob = _make_hook()
 
-    uri = AzureBlobUploader._block(hook, str(local), "exports/big.parquet", "c", LOG)
+    uri = AzureBlobUploader._block(hook, str(local), "exports/big.parquet", "c", LOG, None, None)
 
     assert uri == "azure://c/exports/big.parquet"
     # Three stage_block calls with sequential ids and matching chunk bytes.

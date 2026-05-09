@@ -37,6 +37,7 @@ export = StreamingExportOperator(
   - [Hive-style partitioning](#hive-style-partitioning)
   - [Native unload (server-side, 10–50× faster)](#native-unload-server-side-1050-faster)
   - [Row-level transforms](#row-level-transforms)
+  - [Encryption and object tags](#encryption-and-object-tags)
   - [Per-shard timeout](#per-shard-timeout)
 - [Observability](#observability)
   - [OpenTelemetry tracing](#opentelemetry-tracing)
@@ -404,7 +405,42 @@ tagged with the shard index.
 > `transform_fn` must be a top-level callable — lambdas and closures
 > can't be pickled.
 
-### Per-shard timeout
+### Encryption and object tags
+
+For compliance regimes that require **customer-managed keys**
+(HIPAA, SOC 2, GDPR), every backend respects an `EncryptionOptions`
+on the operator. Provider-managed encryption is always on regardless
+— this is for the customer-managed flavour.
+
+```python
+from airflow_export_to_object_store import (
+    EncryptionOptions,
+    StreamingExportOperator,
+)
+
+StreamingExportOperator(
+    task_id="export_orders",
+    db_hook_id="snowflake_default",
+    storage_hook_id="aws_default",
+    bucket="my-data-lake",
+    sql_template="SELECT * FROM orders WHERE date = '{{ ds }}'",
+    remote_path_template="orders/{{ ds }}/data.parquet",
+    encryption=EncryptionOptions(
+        # Pick the field your backend understands; the others are ignored.
+        kms_key_id="arn:aws:kms:us-east-1:123456789012:key/abcd-...",   # S3 SSE-KMS
+        # encryption_scope="my-azure-scope",                            # Azure CMK
+        # kms_key_name="projects/p/locations/l/keyRings/r/cryptoKeys/k", # GCS CMEK
+    ),
+    tags={"team": "data-platform", "env": "prod"},
+)
+```
+
+Object tags / metadata are passed through the same way — S3 stores
+them as object tags (URL-encoded `key=val&...`), Azure as blob
+metadata, GCS as object metadata. Useful for cost allocation and
+lifecycle policies.
+
+## Per-shard timeout
 
 ```python
 from airflow_export_to_object_store import ShardOptions
@@ -518,6 +554,7 @@ skipped — they cannot break the operator.
 | `RetryOptions` | `upload_retries`, `backoff_base`, `backoff_cap` |
 | `ShardOptions` | `max_workers`, `chunk_rows`, `memory_limit_mb`, `timeout`, `execution_mode` |
 | `IncrementalConfig` | `watermark_query` *or* `watermark_now_template`, `xcom_key`, `default_value` |
+| `EncryptionOptions` | `kms_key_id` + `sse_algorithm` (S3), `encryption_scope` (Azure), `kms_key_name` (GCS) |
 | `SnowflakeUnloadOptions` | `storage_integration` *or* `credentials`, `file_format`, `compression`, `max_file_size`, `single`, `overwrite`, `extra_options` |
 
 `StreamingExportOperator` operator parameters:

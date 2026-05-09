@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
+
+from ..encryption import EncryptionOptions
 
 
 @runtime_checkable
@@ -45,8 +47,15 @@ class Uploader(Protocol):
         overwrite: bool,
         storage_hook_id: str,
         log: logging.Logger,
+        encryption: EncryptionOptions | None = None,
+        tags: Mapping[str, str] | None = None,
     ) -> str:
-        """Upload ``local_path`` and return a canonical URI (``s3://...``/``azure://...``)."""
+        """Upload ``local_path`` and return a canonical URI (``s3://...``/``azure://...``).
+
+        ``encryption`` and ``tags`` are optional; uploaders should pick the
+        fields they understand and silently ignore the rest. Plugin
+        implementations written before v1.2 should accept these as keyword-
+        only arguments with default ``None`` to remain forward-compatible."""
 
     def exists(
         self,

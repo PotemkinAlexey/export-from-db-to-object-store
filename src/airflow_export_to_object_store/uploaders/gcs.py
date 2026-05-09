@@ -10,13 +10,15 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 try:
     from airflow.providers.google.cloud.hooks.gcs import GCSHook
 except ImportError:
     GCSHook = None  # type: ignore[assignment]
+
+from ..encryption import EncryptionOptions
 
 
 class GCSUploader:
@@ -91,17 +93,33 @@ class GCSUploader:
         overwrite: bool,
         storage_hook_id: str,
         log: logging.Logger,
+        encryption: EncryptionOptions | None = None,
+        tags: Mapping[str, str] | None = None,
     ) -> str:
         if not bucket:
             raise ValueError("bucket must be set for GCS uploads")
 
         log.info("GCS upload: %s → gs://%s/%s", local_path, bucket, remote_path)
 
-        # GCSHook.upload supports gzip, mime_type, and multipart resumable upload
-        # internally; we keep the call minimal and let the hook decide.
-        storage_hook.upload(
-            bucket_name=bucket,
-            object_name=remote_path,
-            filename=local_path,
-        )
+        kms_key_name = encryption.kms_key_name if encryption is not None else None
+
+        if kms_key_name:
+            # GCSHook.upload doesn't take kms_key_name; use the underlying
+            # client so we can construct the blob with the CMEK key bound.
+            client = storage_hook.get_conn()
+            blob = client.bucket(bucket).blob(remote_path, kms_key_name=kms_key_name)
+            if tags:
+                blob.metadata = dict(tags)
+            blob.upload_from_filename(local_path)
+        else:
+            # Hook's upload() handles auth, resumable multipart, retries.
+            kwargs: dict[str, Any] = {
+                "bucket_name": bucket,
+                "object_name": remote_path,
+                "filename": local_path,
+            }
+            if tags:
+                kwargs["metadata"] = dict(tags)
+            storage_hook.upload(**kwargs)
+
         return f"gs://{bucket}/{remote_path}"

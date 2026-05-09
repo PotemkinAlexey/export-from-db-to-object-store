@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-05-08
+
+### Added
+- **Server-side encryption with customer-managed keys**. New
+  ``EncryptionOptions`` dataclass plumbed through every backend:
+  - **S3**: ``sse_algorithm`` (``"AES256"`` for SSE-S3, ``"aws:kms"``
+    for SSE-KMS) and ``kms_key_id``. Setting just ``kms_key_id``
+    implies ``aws:kms`` automatically.
+  - **Azure Blob**: ``encryption_scope`` reaches both ``stage_block``
+    (per chunk) and ``commit_block_list`` so block-list uploads of
+    large files are encrypted end-to-end.
+  - **GCS**: ``kms_key_name`` switches the upload from
+    ``GCSHook.upload`` (which doesn't accept the kwarg) to a direct
+    ``bucket.blob(name, kms_key_name=...).upload_from_filename`` so
+    CMEK is honoured.
+- **Object tags / metadata**. New ``tags: dict[str, str]`` on the
+  operator: stored as S3 object tags (URL-encoded), Azure blob
+  metadata, GCS object metadata. Useful for cost allocation and
+  lifecycle policies.
+- ``EncryptionOptions`` re-exported from the top-level package.
+
+### Changed
+- ``Uploader.upload()`` Protocol accepts two new keyword-only
+  arguments: ``encryption: EncryptionOptions | None = None`` and
+  ``tags: Mapping[str, str] | None = None``. Both default to
+  ``None``, so this is backwards-compatible — third-party plugins
+  that don't care about either can stay as-is, but ones that want to
+  honour them should accept the new kwargs.
+- ``ShardTaskParams`` carries ``encryption`` and ``tags`` so they
+  cross the executor boundary in both threads and processes mode.
+
+### Repo polish
+- ``.github/ISSUE_TEMPLATE/`` (bug + feature) and
+  ``.github/PULL_REQUEST_TEMPLATE.md``.
+- ``SECURITY.md`` documenting the disclosure process and the
+  in-scope / out-of-scope surface.
+
 ## [1.1.0] - 2026-05-08
 
 ### Added

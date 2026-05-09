@@ -1,0 +1,83 @@
+name: Bug report
+description: Something the operator does wrong, with concrete reproduction steps.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A short description of the bug, including the error message or wrong behaviour.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: |
+        Minimum DAG / operator config that triggers the bug. Please redact
+        anything sensitive (connection IDs, bucket names) but keep the
+        shape of `StreamingExportOperator(...)` arguments intact.
+      render: python
+    validations:
+      required: true
+
+  - type: input
+    id: package_version
+    attributes:
+      label: airflow-export-to-object-store version
+      placeholder: "1.2.0"
+    validations:
+      required: true
+
+  - type: input
+    id: airflow_version
+    attributes:
+      label: Airflow version
+      placeholder: "2.9.0"
+    validations:
+      required: true
+
+  - type: input
+    id: python_version
+    attributes:
+      label: Python version
+      placeholder: "3.11"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Storage backend
+      multiple: true
+      options:
+        - AWS S3
+        - Azure Blob Storage
+        - Google Cloud Storage
+        - Custom plugin (please describe in How-to-reproduce)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: db
+    attributes:
+      label: Database
+      multiple: true
+      options:
+        - Postgres
+        - Snowflake
+        - BigQuery
+        - Redshift
+        - Databricks SQL
+        - Teradata
+        - Other DB-API source (please describe)
+    validations:
+      required: true
+
+  - type: textarea
+    id: traceback
+    attributes:
+      label: Traceback (if any)
+      description: Full traceback from the Airflow task log.
+      render: shell

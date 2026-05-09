@@ -19,6 +19,7 @@ import pyarrow as pa
 from airflow.hooks.base import BaseHook
 from airflow.models import BaseOperator
 
+from .encryption import EncryptionOptions
 from .incremental import IncrementalConfig, coerce_watermark
 from .manifest import build_manifest, resolve_manifest_path, write_manifest_local
 from .metrics import ExportMetrics
@@ -131,6 +132,8 @@ class StreamingExportOperator(BaseOperator):
         unload_dir_template: str = "{{ ds }}/",
         incremental: IncrementalConfig | None = None,
         transform_fn: Any | None = None,
+        encryption: EncryptionOptions | None = None,
+        tags: dict[str, str] | None = None,
         **kwargs,
     ):
 
@@ -167,6 +170,8 @@ class StreamingExportOperator(BaseOperator):
         self.unload_dir_template = unload_dir_template
         self.incremental = incremental
         self.transform_fn = transform_fn
+        self.encryption = encryption
+        self.tags = tags
 
         # === NEW: metrics object ===
         self._metrics = ExportMetrics(self)
@@ -262,6 +267,8 @@ class StreamingExportOperator(BaseOperator):
                     retry_options=self.retry_options,
                     skip_if_exists=self.skip_if_exists,
                     transform_fn=self.transform_fn,
+                    encryption=self.encryption,
+                    tags=dict(self.tags) if self.tags else None,
                 )
             )
 
@@ -490,6 +497,8 @@ class StreamingExportOperator(BaseOperator):
                 overwrite=True,
                 storage_hook_id=self.storage_hook_id,
                 log=self.log,
+                encryption=self.encryption,
+                tags=dict(self.tags) if self.tags else None,
             )
             self.log.info("Manifest uploaded → %s", uri)
 
@@ -519,6 +528,8 @@ class StreamingExportOperator(BaseOperator):
                 overwrite=True,
                 storage_hook_id=self.storage_hook_id,
                 log=self.log,
+                encryption=self.encryption,
+                tags=dict(self.tags) if self.tags else None,
             )
             self.log.info("Manifest uploaded → %s", uri)
 
