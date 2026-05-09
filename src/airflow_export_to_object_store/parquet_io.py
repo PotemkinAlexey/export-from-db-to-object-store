@@ -366,8 +366,32 @@ class ShardWorker:
             return current_chunk
 
     def _safe_put_sentinel(self) -> None:
-        with suppress(Exception):
-            self._queue.put_nowait(None)
+        """Deliver the end-of-stream marker to the writer.
+
+        ``put_nowait`` is wrong here: the queue often holds the last
+        produced batches when the fetch loop exits, so the sentinel
+        would silently fail with ``queue.Full`` and the writer would
+        spin on ``get(timeout=5)`` forever (its stop event isn't
+        set on the happy path).
+
+        Block instead, with a generous deadline, while honouring stop
+        signals so we don't deadlock if the writer has died — in that
+        case run()'s deadlock detector takes over.
+        """
+        deadline = 30.0  # seconds — way more than any realistic batch write
+        elapsed = 0.0
+        step = 0.5
+        while elapsed < deadline:
+            if self._should_stop():
+                # Writer is exiting via _should_stop too; sentinel optional.
+                with suppress(Exception):
+                    self._queue.put_nowait(None)
+                return
+            try:
+                self._queue.put(None, timeout=step)
+                return
+            except queue.Full:
+                elapsed += step
 
     def _drain_queue(self) -> None:
         while True:
