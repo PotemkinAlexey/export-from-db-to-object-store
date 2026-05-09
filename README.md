@@ -76,6 +76,8 @@ pip install "airflow-export-to-object-store[s3]"           # AWS S3
 pip install "airflow-export-to-object-store[azure]"        # Azure Blob
 pip install "airflow-export-to-object-store[gcs]"          # Google Cloud Storage
 pip install "airflow-export-to-object-store[snowflake]"    # Snowflake driver + provider
+pip install "airflow-export-to-object-store[redshift]"     # Redshift unload strategy
+pip install "airflow-export-to-object-store[bigquery]"     # BigQuery unload strategy
 pip install "airflow-export-to-object-store[postgres]"     # psycopg2
 pip install "airflow-export-to-object-store[databricks]"   # Databricks SQL
 pip install "airflow-export-to-object-store[teradata]"     # Teradata
@@ -317,6 +319,62 @@ cross the SQL boundary.
 Today the Snowflake strategy supports S3 and GCS targets; Azure
 unload requires the storage account name (raises a clear error until
 someone wires it).
+
+**BigQuery → GCS** (`EXPORT DATA OPTIONS(...) AS SELECT ...`):
+
+```python
+from airflow_export_to_object_store.unload import (
+    BigQueryUnloadOptions,
+    BigQueryUnloadStrategy,
+)
+
+StreamingExportOperator(
+    task_id="export_orders_bq",
+    db_hook_id="google_cloud_default",
+    storage_hook_id="google_cloud_default",
+    bucket="my-data-lake",
+    sql_template="SELECT * FROM analytics.orders WHERE _PARTITIONDATE = '{{ ds }}'",
+    unload_dir_template="orders/{{ ds }}/",
+    write_manifest=True,
+    unload_strategy=BigQueryUnloadStrategy(
+        BigQueryUnloadOptions(compression="ZSTD"),
+    ),
+)
+```
+
+**Redshift → S3** (`UNLOAD ('...') TO 's3://...'`):
+
+```python
+from airflow_export_to_object_store.unload import (
+    RedshiftUnloadOptions,
+    RedshiftUnloadStrategy,
+)
+
+StreamingExportOperator(
+    task_id="export_events_redshift",
+    db_hook_id="redshift_default",
+    storage_hook_id="aws_default",
+    bucket="my-data-lake",
+    sql_template="SELECT * FROM events WHERE event_date = '{{ ds }}'",
+    unload_dir_template="events/{{ ds }}/",
+    write_manifest=True,
+    unload_strategy=RedshiftUnloadStrategy(
+        RedshiftUnloadOptions(
+            iam_role="arn:aws:iam::123456789012:role/RedshiftUnload",
+            max_file_size_mb=256,
+            cleanpath=True,
+        ),
+    ),
+)
+```
+
+For BigQuery and Redshift the strategies issue the SQL, then list the
+destination prefix to enumerate produced files (these warehouses don't
+return per-file metadata in the immediate result). Per-file row counts
+are therefore left at `0`; consumers should rely on the manifest's
+file list and bytes, or query `STL_UNLOAD_LOG` (Redshift) /
+`INFORMATION_SCHEMA.JOBS_BY_PROJECT` (BigQuery) for authoritative row
+counts when needed.
 
 ### Row-level transforms
 

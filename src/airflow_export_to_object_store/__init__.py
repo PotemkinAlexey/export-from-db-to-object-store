@@ -9,7 +9,7 @@ from .operator import StreamingExportOperator
 from .options import ParquetOptions, RetryOptions, ShardOptions, ShardResult
 from .retry import with_retries
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     "StreamingExportOperator",

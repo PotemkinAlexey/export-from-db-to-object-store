@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-05-08
+
+### Added
+- **BigQuery → GCS native unload** via ``BigQueryUnloadStrategy`` and
+  ``BigQueryUnloadOptions``. Issues
+  ``EXPORT DATA OPTIONS(uri='gs://.../*.parquet', format='PARQUET',
+  compression='ZSTD', overwrite=true) AS SELECT ...`` against the
+  user's BigQueryHook, then lists the destination GCS prefix to
+  build ``ShardResult``s. Per-file row counts are not surfaced by
+  ``EXPORT DATA``, so they're set to ``0``; manifest still reports
+  per-file bytes.
+- **Redshift → S3 native unload** via ``RedshiftUnloadStrategy`` and
+  ``RedshiftUnloadOptions``. Builds an ``UNLOAD ('...') TO 's3://...'``
+  statement (single-quote escaping handled), supports ``IAM_ROLE``
+  *or* ``CREDENTIALS``, ``PARALLEL ON/OFF``, ``MAXFILESIZE``,
+  ``CLEANPATH``, ``MANIFEST``, plus an ``extra_options`` escape hatch
+  for raw clauses. Filters the auxiliary ``manifest`` file from the
+  results so the export manifest doesn't list catalog metadata as a
+  data shard.
+- New ``redshift`` and ``bigquery`` extras in pyproject.
+
+### Changed
+- ``unload`` package re-exports both new strategies and their option
+  dataclasses alongside the existing Snowflake ones.
+
 ## [1.0.0] - 2026-05-08
 
 First stable release.
