@@ -70,6 +70,7 @@ otel = ["opentelemetry-api>=1.20"]
 dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
+    "pytest-timeout>=2.2",
     "moto[s3]>=4.2",
     "ruff>=0.4",
     "mypy>=1.8",
@@ -111,3 +112,9 @@ warn_unused_ignores = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+# Safety net: no individual test should run for more than 60 s. The
+# threading-heavy ShardWorker tests use Timer/Event watchdogs of their
+# own (≤ 5 s), so anything past a minute is a hung thread or deadlock —
+# kill the test instead of letting CI burn for hours.
+timeout = 60
+timeout_method = "thread"
